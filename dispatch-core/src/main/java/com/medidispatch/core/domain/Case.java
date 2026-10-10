@@ -29,7 +29,7 @@ public class Case {
         this.status = CaseStatus.MONITORING;
     }
 
-    void transitionTo(CaseStatus next){
+    public void transitionTo(CaseStatus next){
         if (next == null) {
             throw new IllegalArgumentException("next status is required");
         }
@@ -38,7 +38,7 @@ public class Case {
         }
         status = next;
     }
-    void updateBand(RiskBand newBand){
+    public void updateBand(RiskBand newBand){
         if (newBand == null) {
             throw new IllegalArgumentException("band is required");
         }
