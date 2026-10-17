@@ -21,7 +21,6 @@
 - [Repository layout](#repository-layout)
 - [Testing](#testing)
 - [Safety, privacy and fairness](#safety-privacy-and-fairness)
-- [Author](#author)
 
 ---
 
@@ -279,9 +278,3 @@ Planned: contract tests that run the same suite against the in-memory and the Re
 - **Fairness.** Age and conditions are meant to raise appropriate attention, never silently lower it. This is covered by dedicated scenario tests.
 - **Safe degradation.** If scoring is unavailable, the system falls back to the last known risk plus a conservative default. It never goes silent.
 - **Alert fatigue.** Hysteresis and cooldowns prevent a patient on a band boundary from flooding responders with alerts.
-
-## Author
-
-Built by **Anuj** as a learning project in low-level design, high-level design and scalable systems, and as a mini-project exploring technology for healthcare response.
-
-*License: to be decided.*
