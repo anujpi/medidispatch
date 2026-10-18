@@ -177,10 +177,12 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | Cases | `Case` and `CaseStatus` state machine |
 | Resources | `Resource`, `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
 | People | `Patient` |
-| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository` |
-| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `Assignment` |
+| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository` |
+| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases), `Assignment` |
 
-**In progress:** `CaseRepository` and `CaseManager`, which connect risk assessments to cases and the queue.
+The first end-to-end path works in memory, and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, and the case moves to `RESPONDING`.
+
+**In progress:** turning `Assignment` into a real entity with its own lifecycle, which unlocks resource release, timeouts and reassignment.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -192,7 +194,8 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 - [x] Case and resource state machines
 - [x] Ports and in-memory adapters (queue, resources, claims, patients)
 - [x] Dispatcher with atomic claiming
-- [ ] Case repository and case manager
+- [x] Case repository and case manager
+- [ ] Assignment as an entity with a lifecycle
 - [ ] Resource release and case completion
 - [ ] Event publisher port and domain events
 - [ ] Assignment lifecycle, timeouts and automatic reassignment
@@ -250,7 +253,7 @@ medidispatch/
     src/main/java/com/medidispatch/core/
       domain/                 Case, Resource, Patient, Location, VitalsReading, RiskAssessment, ...
       scoring/                RiskScorer and its implementations
-      engine/                 Dispatcher (CaseManager and more to come)
+      engine/                 Dispatcher, CaseManager (more to come)
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator
     src/test/java/...         unit, concurrency and scenario tests
