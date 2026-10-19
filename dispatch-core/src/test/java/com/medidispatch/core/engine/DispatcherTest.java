@@ -1,6 +1,7 @@
 package com.medidispatch.core.engine;
 
 import com.medidispatch.core.domain.Assignment;
+import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Location;
@@ -9,6 +10,7 @@ import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.RiskBand;
+import com.medidispatch.core.memory.InMemoryAssignmentRepository;
 import com.medidispatch.core.memory.InMemoryCaseQueue;
 import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
@@ -38,8 +40,9 @@ public class DispatcherTest {
     private final InMemoryPatientRepository patients = new InMemoryPatientRepository();
     private final InMemoryResourceRepository resources = new InMemoryResourceRepository();
     private final InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
+    private final InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
     private final Dispatcher dispatcher =
-            new Dispatcher(queue, patients, resources, claimer, clock, 20.0);
+            new Dispatcher(queue, patients, resources, claimer, assignments, clock, 20.0);
 
     // ---------- helpers ----------
 
@@ -91,6 +94,18 @@ public class DispatcherTest {
 
         assertTrue(resources.findById("als-far").get().isAvailable());
         assertTrue(claimer.claimedBy("als-far").isEmpty());
+    }
+
+    @Test
+    void theAssignmentIsStoredAndFindableByCase() {
+        addResource("als-1", ResourceType.AMBULANCE_ALS, NEAR);
+        addCase("case-1", RiskBand.CRITICAL);
+
+        Assignment a = dispatcher.dispatchNext().get();
+
+        Assignment stored = assignments.findActiveByCaseId("case-1").get();
+        assertEquals(a.id(), stored.id());
+        assertEquals(AssignmentStatus.ASSIGNED, stored.status());
     }
 
     // ---------- resource types ----------
@@ -175,6 +190,15 @@ public class DispatcherTest {
     }
 
     @Test
+    void nothingIsStoredWhenNothingWasDispatched() {
+        addCase("case-1", RiskBand.CRITICAL);                       // no units exist
+
+        dispatcher.dispatchNext();
+
+        assertTrue(assignments.findActiveByCaseId("case-1").isEmpty());
+    }
+
+    @Test
     void aResourceOfTheWrongTypeIsNotUsed() {
         addResource("nurse-1", ResourceType.NURSE, NEAR);
         addCase("case-1", RiskBand.CRITICAL);
@@ -242,18 +266,20 @@ public class DispatcherTest {
     @Test
     void constructorRejectsMissingCollaboratorsAndBadRadius() {
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(null, patients, resources, claimer, clock, 20));
+                () -> new Dispatcher(null, patients, resources, claimer, assignments, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, null, resources, claimer, clock, 20));
+                () -> new Dispatcher(queue, null, resources, claimer, assignments, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, null, claimer, clock, 20));
+                () -> new Dispatcher(queue, patients, null, claimer, assignments, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, null, clock, 20));
+                () -> new Dispatcher(queue, patients, resources, null, assignments, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, null, 20));
+                () -> new Dispatcher(queue, patients, resources, claimer, null, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, clock, 0));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, null, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, clock, -5));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, clock, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, clock, -5));
     }
 }

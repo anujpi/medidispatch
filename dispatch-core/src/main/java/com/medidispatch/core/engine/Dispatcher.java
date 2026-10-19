@@ -1,10 +1,7 @@
 package com.medidispatch.core.engine;
 
 import com.medidispatch.core.domain.*;
-import com.medidispatch.core.port.CaseQueue;
-import com.medidispatch.core.port.PatientRepository;
-import com.medidispatch.core.port.ResourceClaimer;
-import com.medidispatch.core.port.ResourceRepository;
+import com.medidispatch.core.port.*;
 
 import java.time.Clock;
 import java.util.List;
@@ -18,13 +15,15 @@ public class Dispatcher {
     private final ResourceClaimer claimer;
     private final Clock clock;
     private final double searchRadiusKm;
+    private final AssignmentRepository assignments;
     public Dispatcher(CaseQueue queue,
                       PatientRepository patients,
                       ResourceRepository resources,
                       ResourceClaimer claimer,
+                      AssignmentRepository assignments,
                       Clock clock,
                       double searchRadiusKm) {
-        if (queue == null || patients == null || resources == null || claimer == null || clock == null) {
+        if (queue == null || patients == null || resources == null || assignments == null || claimer == null || clock == null) {
             throw new IllegalArgumentException("queue, patients, resources, claimer and clock are required");
         }
         if (searchRadiusKm <= 0) {
@@ -34,6 +33,7 @@ public class Dispatcher {
         this.patients = patients;
         this.resources = resources;
         this.claimer = claimer;
+        this.assignments = assignments;
         this.clock = clock;
         this.searchRadiusKm = searchRadiusKm;
     }
@@ -58,7 +58,9 @@ public class Dispatcher {
             if (claimer.tryClaim(candidate.id(), c.id())) {
                 candidate.transitionTo(ResourceStatus.ASSIGNED);
                 resources.save(candidate);
-                return Optional.of(new Assignment(c.id(), candidate.id(), clock.instant()));
+                Assignment assignment = new Assignment(c.id(),candidate.id(),clock.instant());
+                assignments.save(assignment);
+                return Optional.of(assignment);
             }
         }
         queue.enqueue(c);

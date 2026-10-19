@@ -17,6 +17,7 @@ import com.medidispatch.core.memory.InMemoryCaseRepository;
 import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
+import com.medidispatch.core.memory.InMemoryAssignmentRepository;
 import com.medidispatch.core.scoring.SimpleScorer;
 import org.junit.jupiter.api.Test;
 
@@ -224,8 +225,9 @@ public class CaseManagerTest {
         InMemoryPatientRepository patients = new InMemoryPatientRepository();
         InMemoryResourceRepository resources = new InMemoryResourceRepository();
         InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
+        InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
         SimpleScorer scorer = new SimpleScorer(clock);
-        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, clock, 20.0);
+        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, assignments, clock, 20.0);
 
         patients.save(new Patient("p1", new Location(0, 0)));
         resources.save(new Resource("als-1", ResourceType.AMBULANCE_ALS, new Location(0.01, 0)));
