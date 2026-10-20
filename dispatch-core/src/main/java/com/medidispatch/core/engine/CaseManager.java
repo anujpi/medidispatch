@@ -63,9 +63,20 @@ public class CaseManager {
         if (assignment == null) {
             throw new IllegalArgumentException("assignment is required");
         }
-        Case c = cases.findById(assignment.caseId())
-                .orElseThrow(() -> new IllegalStateException("Case " + assignment.caseId() + " not found"));
-        c.transitionTo(CaseStatus.RESPONDING);
+        move(assignment.caseId(), CaseStatus.RESPONDING);
+    }
+    public void onStabilised(String caseId) {
+        move(caseId, CaseStatus.STABILISED);
+    }
+
+    public void close(String caseId) {
+        move(caseId, CaseStatus.CLOSED);
+    }
+
+    private void move(String caseId, CaseStatus next) {
+        Case c = cases.findById(caseId)
+                .orElseThrow(() -> new IllegalStateException("Case " + caseId + " not found"));
+        c.transitionTo(next);
         cases.save(c);
     }
 

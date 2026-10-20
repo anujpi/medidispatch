@@ -216,6 +216,45 @@ public class CaseManagerTest {
         assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, null, clock));
         assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, queue, null));
     }
+    // ---------- onStabilised and close ----------
+
+    @Test
+    void onStabilisedMovesARespondingCaseToStabilised() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+
+        manager.onStabilised(c.id());
+
+        assertEquals(CaseStatus.STABILISED, reload(c).status());
+    }
+
+    @Test
+    void closeMovesAStabilisedCaseToClosedAndItIsNoLongerOpen() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onStabilised(c.id());
+
+        manager.close(c.id());
+
+        assertEquals(CaseStatus.CLOSED, reload(c).status());
+        assertTrue(cases.findOpenByPatientId("p1").isEmpty());
+    }
+
+    @Test
+    void closingACaseThatIsStillRespondingIsRefusedAndChangesNothing() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+
+        assertThrows(IllegalStateException.class, () -> manager.close(c.id()));
+
+        assertEquals(CaseStatus.RESPONDING, reload(c).status());
+    }
+
+    @Test
+    void stabilisingOrClosingAnUnknownCaseFails() {
+        assertThrows(IllegalStateException.class, () -> manager.onStabilised("ghost"));
+        assertThrows(IllegalStateException.class, () -> manager.close("ghost"));
+    }
 
     // ---------- the whole chain ----------
 
