@@ -12,12 +12,9 @@ import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.RiskAssessment;
 import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.domain.VitalsReading;
-import com.medidispatch.core.memory.InMemoryCaseQueue;
-import com.medidispatch.core.memory.InMemoryCaseRepository;
-import com.medidispatch.core.memory.InMemoryPatientRepository;
-import com.medidispatch.core.memory.InMemoryResourceClaimer;
-import com.medidispatch.core.memory.InMemoryResourceRepository;
-import com.medidispatch.core.memory.InMemoryAssignmentRepository;
+import com.medidispatch.core.event.CaseBandChanged;
+import com.medidispatch.core.event.CaseStatusChanged;
+import com.medidispatch.core.memory.*;
 import com.medidispatch.core.scoring.SimpleScorer;
 import org.junit.jupiter.api.Test;
 
@@ -36,8 +33,8 @@ public class CaseManagerTest {
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final InMemoryCaseQueue queue = new InMemoryCaseQueue();
     private final InMemoryCaseRepository cases = new InMemoryCaseRepository();
-    private final CaseManager manager = new CaseManager(cases, queue, clock);
-
+    private final InMemoryEventPublisher events = new InMemoryEventPublisher();
+    private final CaseManager manager = new CaseManager(cases, queue, events, clock);
     // ---------- helpers ----------
 
     private RiskAssessment assessment(String patientId, RiskBand band) {
@@ -212,9 +209,10 @@ public class CaseManagerTest {
 
     @Test
     void constructorRejectsMissingCollaborators() {
-        assertThrows(IllegalArgumentException.class, () -> new CaseManager(null, queue, clock));
-        assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, null, clock));
-        assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, queue, null));
+        assertThrows(IllegalArgumentException.class, () -> new CaseManager(null, queue,events, clock));
+
+        assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, null,events, clock));
+        assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, queue, events,null));
     }
     // ---------- onStabilised and close ----------
 
@@ -255,6 +253,81 @@ public class CaseManagerTest {
         assertThrows(IllegalStateException.class, () -> manager.onStabilised("ghost"));
         assertThrows(IllegalStateException.class, () -> manager.close("ghost"));
     }
+    // ---------- events ----------
+
+    @Test
+    void aNewAlertedCasePublishesOneStatusChange() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+
+        assertEquals(List.of(
+                        new CaseStatusChanged(c.id(), "p1", CaseStatus.MONITORING, CaseStatus.ALERTED, NOW)),
+                events.published());
+    }
+
+    @Test
+    void aLowAssessmentForANewPatientPublishesNothing() {
+        manager.handle(assessment("p1", RiskBand.LOW));
+
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void theSameAssessmentTwicePublishesNothingTheSecondTime() {
+        manager.handle(assessment("p1", RiskBand.HIGH));
+        events.clear();
+
+        manager.handle(assessment("p1", RiskBand.HIGH));
+
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void aWorseBandPublishesABandChangeAndNoStatusChange() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        events.clear();
+
+        manager.handle(assessment("p1", RiskBand.CRITICAL));
+
+        assertEquals(List.of(
+                        new CaseBandChanged(c.id(), "p1", RiskBand.HIGH, RiskBand.CRITICAL, NOW)),
+                events.published());
+    }
+
+    @Test
+    void recoveryPublishesTheBandChangeThenTheStatusChange() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        events.clear();
+
+        manager.handle(assessment("p1", RiskBand.LOW));
+
+        assertEquals(List.of(
+                        new CaseBandChanged(c.id(), "p1", RiskBand.HIGH, RiskBand.LOW, NOW),
+                        new CaseStatusChanged(c.id(), "p1", CaseStatus.ALERTED, CaseStatus.MONITORING, NOW)),
+                events.published());
+    }
+
+    @Test
+    void onAssignedPublishesAStatusChange() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        events.clear();
+
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+
+        assertEquals(List.of(
+                        new CaseStatusChanged(c.id(), "p1", CaseStatus.ALERTED, CaseStatus.RESPONDING, NOW)),
+                events.published());
+    }
+
+    @Test
+    void aRefusedMovePublishesNothing() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.close(c.id()));   // RESPONDING cannot close
+
+        assertTrue(events.published().isEmpty());
+    }
 
     // ---------- the whole chain ----------
 
@@ -266,7 +339,7 @@ public class CaseManagerTest {
         InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
         InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
         SimpleScorer scorer = new SimpleScorer(clock);
-        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, assignments, clock, 20.0);
+        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, assignments,events, clock, 20.0);
 
         patients.save(new Patient("p1", new Location(0, 0)));
         resources.save(new Resource("als-1", ResourceType.AMBULANCE_ALS, new Location(0.01, 0)));

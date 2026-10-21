@@ -2,6 +2,7 @@ package com.medidispatch.core.engine;
 
 import com.medidispatch.core.domain.*;
 import com.medidispatch.core.port.*;
+import com.medidispatch.core.event.UnitAssigned;
 
 import java.time.Clock;
 import java.util.List;
@@ -13,6 +14,7 @@ public class Dispatcher {
     private final PatientRepository patients;
     private final ResourceRepository resources;
     private final ResourceClaimer claimer;
+    private final EventPublisher publisher;
     private final Clock clock;
     private final double searchRadiusKm;
     private final AssignmentRepository assignments;
@@ -21,9 +23,10 @@ public class Dispatcher {
                       ResourceRepository resources,
                       ResourceClaimer claimer,
                       AssignmentRepository assignments,
+                      EventPublisher publisher,
                       Clock clock,
                       double searchRadiusKm) {
-        if (queue == null || patients == null || resources == null || assignments == null || claimer == null || clock == null) {
+        if (queue == null || patients == null || resources == null || publisher == null || assignments == null || claimer == null || clock == null) {
             throw new IllegalArgumentException("queue, patients, resources, claimer and clock are required");
         }
         if (searchRadiusKm <= 0) {
@@ -33,6 +36,7 @@ public class Dispatcher {
         this.patients = patients;
         this.resources = resources;
         this.claimer = claimer;
+        this.publisher = publisher;
         this.assignments = assignments;
         this.clock = clock;
         this.searchRadiusKm = searchRadiusKm;
@@ -60,6 +64,7 @@ public class Dispatcher {
                 resources.save(candidate);
                 Assignment assignment = new Assignment(c.id(),candidate.id(),clock.instant());
                 assignments.save(assignment);
+                publisher.publish(new UnitAssigned(assignment.id(), c.id(), candidate.id(), clock.instant()));
                 return Optional.of(assignment);
             }
         }

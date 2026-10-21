@@ -6,12 +6,17 @@ import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
+import com.medidispatch.core.event.AssignmentStatusChanged;
 import com.medidispatch.core.memory.InMemoryAssignmentRepository;
+import com.medidispatch.core.memory.InMemoryEventPublisher;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -19,10 +24,13 @@ public class AssignmentManagerTest {
 
     private static final Instant NOW = Instant.parse("2026-10-07T12:00:00Z");
 
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
     private final InMemoryResourceRepository resources = new InMemoryResourceRepository();
     private final InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
-    private final AssignmentManager manager = new AssignmentManager(assignments, resources, claimer);
+    private final InMemoryEventPublisher events = new InMemoryEventPublisher();
+    private final AssignmentManager manager =
+            new AssignmentManager(assignments, resources, claimer, events, clock);
 
     // ---------- helpers ----------
 
@@ -193,6 +201,47 @@ public class AssignmentManagerTest {
         assertEquals("case-2", claimer.claimedBy("r2").get());
     }
 
+    // ---------- events ----------
+
+    @Test
+    void everyStepOfTheTripPublishesAStatusChange() {
+        Assignment a = dispatched("case-1", "r1");
+
+        manager.onEnRoute("case-1");
+        manager.onArrived("case-1");
+        manager.complete("case-1");
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.ASSIGNED, AssignmentStatus.EN_ROUTE, NOW),
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.EN_ROUTE, AssignmentStatus.ARRIVED, NOW),
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.ARRIVED, AssignmentStatus.DONE, NOW)),
+                events.published());
+    }
+
+    @Test
+    void cancelPublishesAStatusChange() {
+        Assignment a = dispatched("case-1", "r1");
+
+        manager.cancel("case-1");
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.ASSIGNED, AssignmentStatus.CANCELLED, NOW)),
+                events.published());
+    }
+
+    @Test
+    void aRefusedMovePublishesNothing() {
+        dispatched("case-1", "r1");                                 // still ASSIGNED
+
+        assertThrows(IllegalStateException.class, () -> manager.complete("case-1"));
+
+        assertTrue(events.published().isEmpty());
+    }
+
     // ---------- errors ----------
 
     @Test
@@ -214,10 +263,14 @@ public class AssignmentManagerTest {
     @Test
     void constructorRejectsMissingCollaborators() {
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentManager(null, resources, claimer));
+                () -> new AssignmentManager(null, resources, claimer, events, clock));
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentManager(assignments, null, claimer));
+                () -> new AssignmentManager(assignments, null, claimer, events, clock));
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentManager(assignments, resources, null));
+                () -> new AssignmentManager(assignments, resources, null, events, clock));
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssignmentManager(assignments, resources, claimer, null, clock));
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssignmentManager(assignments, resources, claimer, events, null));
     }
 }
