@@ -112,9 +112,9 @@ flowchart TB
         MEM[In-memory adapters<br/>tests and simulator]
     end
     subgraph Core["dispatch-core (pure Java)"]
-        ENG[Engine<br/>Dispatcher, CaseManager]
-        DOM[Domain<br/>Case, Resource, Patient, scoring]
-        PORTS[Ports<br/>CaseQueue, ResourceRepository,<br/>ResourceClaimer, PatientRepository,<br/>CaseRepository, EventPublisher]
+        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager]
+        DOM[Domain<br/>Case, Resource, Assignment,<br/>Patient, scoring, events]
+        PORTS[Ports<br/>CaseQueue, ResourceRepository,<br/>ResourceClaimer, PatientRepository,<br/>CaseRepository, AssignmentRepository,<br/>EventPublisher]
     end
     REST --> ENG
     ENG --> DOM
@@ -176,13 +176,15 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | Vitals and scoring | `VitalsReading` (validated), `RiskBand`, `RiskAssessment`, `RiskScorer`, a placeholder `SimpleScorer` |
 | Cases | `Case` and `CaseStatus` state machine |
 | Resources | `Resource`, `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
+| Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`) |
 | People | `Patient` |
-| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository` |
-| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases), `Assignment` |
+| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `EventPublisher` |
+| Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
+| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends) |
 
-The first end-to-end path works in memory, and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, and the case moves to `RESPONDING`.
+The full lifecycle works in memory and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, travels, arrives, and is closed. The ambulance is then freed and serves the next waiting patient, and the engine announces every step as an ordered list of events.
 
-**In progress:** turning `Assignment` into a real entity with its own lifecycle, which unlocks resource release, timeouts and reassignment.
+**In progress:** timeouts and automatic reassignment. A unit that never acknowledges its assignment is timed out and taken offline, the case returns to the queue, and the next-best unit is sent.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -195,10 +197,10 @@ The first end-to-end path works in memory, and is covered by a test: a severely 
 - [x] Ports and in-memory adapters (queue, resources, claims, patients)
 - [x] Dispatcher with atomic claiming
 - [x] Case repository and case manager
-- [ ] Assignment as an entity with a lifecycle
-- [ ] Resource release and case completion
-- [ ] Event publisher port and domain events
-- [ ] Assignment lifecycle, timeouts and automatic reassignment
+- [x] Assignment as an entity with a lifecycle
+- [x] Resource release and case completion
+- [x] Event publisher port and domain events
+- [ ] Timeouts and automatic reassignment
 - [ ] Preemption of lower-priority responses
 - [ ] Response decider (escalation ladder)
 - [ ] Single entry point for readings (`VitalsProcessor`)
@@ -227,7 +229,7 @@ cd medidispatch
 mvn test
 ```
 
-The engine is a library, so there is no server to start yet. The easiest way to see it work is to read a test: `DispatcherTest` wires the real engine to in-memory adapters and walks through dispatch scenarios.
+The engine is a library, so there is no server to start yet. The easiest way to see it work is to read a test: `FullLifecycleTest` wires the whole engine to in-memory adapters and plays out two emergencies that share one ambulance, ending with the ordered list of events the engine announced. `DispatcherTest` covers the dispatch rules in detail.
 
 A minimal example of the engine wired by hand:
 
@@ -236,9 +238,11 @@ CaseQueue queue = new InMemoryCaseQueue();
 PatientRepository patients = new InMemoryPatientRepository();
 ResourceRepository resources = new InMemoryResourceRepository();
 ResourceClaimer claimer = new InMemoryResourceClaimer();
+AssignmentRepository assignments = new InMemoryAssignmentRepository();
+EventPublisher publisher = new InMemoryEventPublisher();
 
 Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer,
-        Clock.systemUTC(), 20.0);          // search radius in km
+        assignments, publisher, Clock.systemUTC(), 20.0);   // search radius in km
 
 Optional<Assignment> assignment = dispatcher.dispatchNext();
 ```
@@ -251,9 +255,10 @@ medidispatch/
   PLAN.md                     detailed project plan
   dispatch-core/              pure-Java engine
     src/main/java/com/medidispatch/core/
-      domain/                 Case, Resource, Patient, Location, VitalsReading, RiskAssessment, ...
+      domain/                 Case, Resource, Assignment, Patient, Location, VitalsReading, RiskAssessment, ...
       scoring/                RiskScorer and its implementations
-      engine/                 Dispatcher, CaseManager (more to come)
+      engine/                 Dispatcher, CaseManager, AssignmentManager (more to come)
+      event/                  domain events the engine announces
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator
     src/test/java/...         unit, concurrency and scenario tests
@@ -269,7 +274,9 @@ Every component is covered by tests, including:
 - exhaustive state-machine tables (every legal and illegal transition),
 - boundary and edge cases for validation and scoring,
 - a **concurrency test**: 100 threads race to claim one ambulance, and exactly one wins,
-- scenario tests for the dispatcher (priority ordering, wrong unit types, units out of range, fallback when a unit is already claimed, retry when none is available).
+- scenario tests for the dispatcher (priority ordering, wrong unit types, units out of range, fallback when a unit is already claimed, retry when none is available),
+- a full-lifecycle test that runs a reading all the way to a closed case and a reused ambulance, and asserts the exact ordered list of events,
+- "nothing happens" tests: repeating an assessment, or attempting an illegal move, changes no state and publishes no events.
 
 Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
 

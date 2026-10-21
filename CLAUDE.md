@@ -21,15 +21,41 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
 - Time comes in through a `java.time.Clock`, never `Instant.now()` inside engine code.
 - Deadline: December. Plan to build everything in PLAN.md.
 
-## Built so far (all with tests)
+- Events are published AFTER state is saved, collected and sent at the end of an operation. Never publish no-ops
+  (same band / same status). The engine must not fail if publishing fails (EventPublisher must not throw);
+  the real fix later is the outbox pattern.
+- Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
+
+## Built so far (all with tests: about 275 tests, 1,150 lines of engine code)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
-Location (haversine), Patient, Assignment (record for now).
-Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository.
-Engine: Dispatcher, CaseManager. Scoring: RiskScorer, SimpleScorer.
-Known nit: `CaseRepository.findByOpenByPatientId` has an extra "By" in its name (rename to findOpenByPatientId).
+Location (haversine), Patient, Assignment (entity) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED).
+Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
+AssignmentRepository, EventPublisher.
+Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
+Engine: Dispatcher, CaseManager, AssignmentManager. Scoring: RiskScorer, SimpleScorer (placeholder).
+FullLifecycleTest proves: reading -> score -> case -> dispatch -> trip -> complete -> close, and the freed
+ambulance serves the next patient, with the exact ordered event list.
+
+Constructor shapes:
+- CaseManager(cases, queue, publisher, clock)
+- Dispatcher(queue, patients, resources, claimer, assignments, publisher, clock, searchRadiusKm)
+- AssignmentManager(assignments, resources, claimer, publisher, clock)
+
+Open small items (mine to fix): Dispatcher missing-patient message has no spaces ("Patient "+id+"not found...");
+Dispatcher constructor error message omits assignments/publisher; EventPublisher has no "must not throw" comment;
+SafeEventPublisher (decorator that logs and swallows failures) was designed but not added.
 
 ## Current step
-Make Assignment a real entity: AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED), Assignment class
-with a guarded transitionTo (keep the 3-arg constructor), AssignmentRepository port + in-memory adapter, and have
-Dispatcher save the assignment. Next after that: resource release and case completion, EventPublisher port,
-timeouts and reassignment, preemption, ResponseDecider, VitalsProcessor, simulator, then real scoring (NEWS2).
+Timeouts and reassignment (spec agreed):
+1. Add TIMED_OUT to AssignmentStatus (ASSIGNED -> TIMED_OUT, terminal); update AssignmentStatusTest table.
+2. AssignmentRepository.findActive() returning a new List of non-terminal assignments (+ in-memory + test).
+3. AssignmentManager.timeOut(caseId): trip -> TIMED_OUT, claim released, unit -> OFFLINE (NOT AVAILABLE, otherwise
+   the same dead unit is picked again forever), event published.
+4. CaseManager.onAssignmentLost(caseId): case RESPONDING -> ALERTED, re-enqueue, event published.
+5. TimeoutMonitor(assignments, assignmentManager, caseManager, clock, ackTimeout).checkTimeouts(): for each active
+   ASSIGNED trip with assignedAt + ackTimeout <= now, timeOut + onAssignmentLost; returns the count. Reassignment is
+   then just the next dispatchNext(). Needs a MutableClock test helper (extends java.time.Clock).
+Key test: two ambulances, the nearest never answers, checkTimeouts, dispatchNext sends the second one.
+
+After that: preemption, ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry
+point), simulator with scorer comparison, then real scoring (trend, baseline, context, NEWS2). Then the Spring layer.
