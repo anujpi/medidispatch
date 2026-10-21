@@ -46,6 +46,9 @@ public class AssignmentManager {
     public void cancel(String caseId) {
         move(caseId, AssignmentStatus.CANCELLED);
     }
+    public void timeOut(String caseId) {
+        move(caseId, AssignmentStatus.TIMED_OUT);
+    }
 
     private void move(String caseId, AssignmentStatus next) {
         if (caseId == null || caseId.isBlank()) {
@@ -57,17 +60,18 @@ public class AssignmentManager {
         a.transitionTo(next);                                // an illegal move throws here, before anything changes
         assignments.save(a);
         if (next.isTerminal()) {                             // DONE or CANCELLED: the unit goes back to the pool
-            freeUnit(a);
+            ResourceStatus after = (next == AssignmentStatus.TIMED_OUT) ? ResourceStatus.OFFLINE : ResourceStatus.AVAILABLE;
+            releaseUnit(a,after);
         }
         publisher.publish(new AssignmentStatusChanged(
                 a.id(), a.caseId(), a.resourceId(), from, next, clock.instant()));
     }
-    private void freeUnit(Assignment a) {
+    private void releaseUnit(Assignment a,ResourceStatus after) {
         claimer.release(a.resourceId(), a.caseId());
         Resource unit = resources.findById(a.resourceId())
                 .orElseThrow(() -> new IllegalStateException("Resource " + a.resourceId() + " not found"));
         if (unit.status() == ResourceStatus.ASSIGNED) {      // an OFFLINE unit stays offline
-            unit.transitionTo(ResourceStatus.AVAILABLE);
+            unit.transitionTo(after);
             resources.save(unit);
         }
     }

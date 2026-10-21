@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -258,6 +259,55 @@ public class AssignmentManagerTest {
         assertThrows(IllegalArgumentException.class, () -> manager.onArrived("  "));
         assertThrows(IllegalArgumentException.class, () -> manager.complete(null));
         assertThrows(IllegalArgumentException.class, () -> manager.cancel(" "));
+    }
+    // ---------- timeOut ----------
+
+    @Test
+    void timeOutEndsTheTripTakesTheUnitOfflineAndReleasesTheClaim() {
+        Assignment a = dispatched("case-1", "r1");
+
+        manager.timeOut("case-1");
+
+        assertEquals(AssignmentStatus.TIMED_OUT, tripStatus(a));
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
+        assertTrue(claimer.claimedBy("r1").isEmpty());
+        assertTrue(assignments.findActiveByCaseId("case-1").isEmpty());
+    }
+
+    @Test
+    void aTimedOutUnitIsNoLongerOfferedAsAvailable() {
+        dispatched("case-1", "r1");
+
+        manager.timeOut("case-1");
+
+        assertTrue(resources.findAvailableNear(
+                new Location(0, 0), 10.0, Set.of(ResourceType.AMBULANCE_ALS)).isEmpty());
+    }
+
+    @Test
+    void timeOutPublishesAStatusChange() {
+        Assignment a = dispatched("case-1", "r1");
+
+        manager.timeOut("case-1");
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.ASSIGNED, AssignmentStatus.TIMED_OUT, NOW)),
+                events.published());
+    }
+
+    @Test
+    void aTripThatIsAlreadyEnRouteCannotBeTimedOut() {
+        Assignment a = dispatched("case-1", "r1");
+        manager.onEnRoute("case-1");
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.timeOut("case-1"));
+
+        assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
+        assertEquals("case-1", claimer.claimedBy("r1").get());
+        assertTrue(events.published().isEmpty());
     }
 
     @Test

@@ -88,6 +88,14 @@ public class CaseManager {
     public void close(String caseId) {
         move(caseId, CaseStatus.CLOSED);
     }
+    public void onAssignmentLost(String caseId){
+        Case c = cases.findById(caseId).orElseThrow(()-> new IllegalStateException("Case" + caseId + " not found"));
+        List<DomainEvent> events  = new ArrayList<>();
+        changeStatus(c,CaseStatus.ALERTED,events);
+        cases.save(c);
+        queue.enqueue(c);
+        publishAll(events);
+    }
 
     private void move(String caseId, CaseStatus next) {
         Case c = cases.findById(caseId)

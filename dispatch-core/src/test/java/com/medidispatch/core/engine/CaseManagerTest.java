@@ -328,6 +328,62 @@ public class CaseManagerTest {
 
         assertTrue(events.published().isEmpty());
     }
+    // ---------- onAssignmentLost ----------
+
+    @Test
+    void anAssignmentLostSendsARespondingCaseBackToAlertedAndIntoTheQueue() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        queue.pollNext();                                                    // the dispatcher took it
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        assertEquals(0, queue.size());
+
+        manager.onAssignmentLost(c.id());
+
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+        assertEquals(1, queue.size());
+    }
+
+    @Test
+    void aRequeuedCaseKeepsItsPriority() {
+        Case a = manager.handle(assessment("a", RiskBand.HIGH)).get();
+        manager.handle(assessment("b", RiskBand.MEDIUM));
+        queue.pollNext();                                                    // a is dispatched
+        manager.onAssigned(new Assignment(a.id(), "r1", NOW));
+
+        manager.onAssignmentLost(a.id());
+
+        assertEquals("a", queue.pollNext().get().patientId());               // a is ahead of b again
+    }
+
+    @Test
+    void anAssignmentLostPublishesAStatusChange() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        events.clear();
+
+        manager.onAssignmentLost(c.id());
+
+        assertEquals(List.of(
+                        new CaseStatusChanged(c.id(), "p1", CaseStatus.RESPONDING, CaseStatus.ALERTED, NOW)),
+                events.published());
+    }
+
+    @Test
+    void anAssignmentLostForACaseThatIsNotRespondingIsRefusedAndChangesNothing() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();     // ALERTED and queued
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.onAssignmentLost(c.id()));
+
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+        assertEquals(1, queue.size());
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void anAssignmentLostForAnUnknownCaseFails() {
+        assertThrows(IllegalStateException.class, () -> manager.onAssignmentLost("ghost"));
+    }
 
     // ---------- the whole chain ----------
 

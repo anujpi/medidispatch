@@ -201,6 +201,8 @@ The full lifecycle works in memory and is covered by a test: a severely abnormal
 - [x] Resource release and case completion
 - [x] Event publisher port and domain events
 - [ ] Timeouts and automatic reassignment
+- [ ] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit
+- [ ] Live trip monitoring: a unit that stops moving or loses signal while en route is declared lost and replaced
 - [ ] Preemption of lower-priority responses
 - [ ] Response decider (escalation ladder)
 - [ ] Single entry point for readings (`VitalsProcessor`)

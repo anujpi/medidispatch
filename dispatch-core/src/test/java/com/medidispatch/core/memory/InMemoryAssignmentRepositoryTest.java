@@ -130,4 +130,46 @@ public class InMemoryAssignmentRepositoryTest {
         assertThrows(IllegalArgumentException.class, () -> repo.findById(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findActiveByCaseId(null));
     }
+    // ---------- findActive ----------
+
+    @Test
+    void findActiveIsEmptyWhenNothingIsStored() {
+        assertTrue(repo.findActive().isEmpty());
+    }
+
+    @Test
+    void findActiveReturnsOnlyAssignmentsThatAreNotFinished() {
+        Assignment live = assignment("case-1", "r1");
+        Assignment done = assignment("case-2", "r2");
+        Assignment cancelled = assignment("case-3", "r3");
+        Assignment timedOut = assignment("case-4", "r4");
+        finish(done);
+        cancelled.transitionTo(AssignmentStatus.CANCELLED);
+        timedOut.transitionTo(AssignmentStatus.TIMED_OUT);
+        repo.save(live);
+        repo.save(done);
+        repo.save(cancelled);
+        repo.save(timedOut);
+
+        assertEquals(1, repo.findActive().size());
+        assertEquals(live.id(), repo.findActive().get(0).id());
+    }
+
+    @Test
+    void findActiveReturnsACopyTheCallerCanChange() {
+        repo.save(assignment("case-1", "r1"));
+
+        repo.findActive().clear();
+
+        assertEquals(1, repo.findActive().size());
+    }
+
+    @Test
+    void aTimedOutAssignmentIsNotActiveForItsCase() {
+        Assignment a = assignment("case-1", "r1");
+        a.transitionTo(AssignmentStatus.TIMED_OUT);
+        repo.save(a);
+
+        assertTrue(repo.findActiveByCaseId("case-1").isEmpty());
+    }
 }

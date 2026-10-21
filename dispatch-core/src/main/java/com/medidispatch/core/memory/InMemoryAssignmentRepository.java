@@ -3,9 +3,7 @@ package com.medidispatch.core.memory;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.port.AssignmentRepository;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 public class InMemoryAssignmentRepository implements AssignmentRepository {
 
@@ -38,5 +36,16 @@ public class InMemoryAssignmentRepository implements AssignmentRepository {
             }
         }
         return Optional.empty();
+    }
+
+    @Override
+    public List<Assignment> findActive() {
+        List<Assignment> active = new ArrayList<>();
+        for(Assignment a:byId.values()){
+            if(!a.status().isTerminal()){
+                active.add(a);
+            }
+        }
+        return active;
     }
 }

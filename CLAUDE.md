@@ -57,5 +57,16 @@ Timeouts and reassignment (spec agreed):
    then just the next dispatchNext(). Needs a MutableClock test helper (extends java.time.Clock).
 Key test: two ambulances, the nearest never answers, checkTimeouts, dispatchNext sends the second one.
 
+Right after timeouts (agreed, onFailed will be used a lot):
+- AssignmentManager.onFailed(caseId): explicit failure report (breakdown, can't complete). Probably a FAILED
+  AssignmentStatus (from ASSIGNED, EN_ROUTE, ARRIVED). Trip FAILED, unit OFFLINE, claim released; then the caller
+  (or a small helper) runs CaseManager.onAssignmentLost so the case is requeued. Should also work for the
+  timeout path so the logic lives in one place.
+- Mid-trip monitoring of EN_ROUTE units using location: redirect if the unit is NOT MOVING (stalled) or its SIGNAL
+  IS LOST. Needs Resource to remember when it last reported (lastSeenAt) and a short position history or a
+  "last progress" marker to detect no movement; a monitor (like TimeoutMonitor) calls onFailed when a unit goes
+  silent for N seconds or makes no progress for M seconds. Needs EtaCalculator for overdue-arrival checks.
+
 After that: preemption, ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry
-point), simulator with scorer comparison, then real scoring (trend, baseline, context, NEWS2). Then the Spring layer.
+point), simulator with scorer comparison (inject breakdowns and signal loss), then real scoring (trend, baseline,
+context, NEWS2). Then the Spring layer.
