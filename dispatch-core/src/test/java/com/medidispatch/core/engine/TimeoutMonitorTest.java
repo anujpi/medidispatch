@@ -28,7 +28,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-public   class TimeoutMonitorTest {
+public class TimeoutMonitorTest {
 
     private static final Instant START = Instant.parse("2026-10-07T12:00:00Z");
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
@@ -51,8 +51,9 @@ public   class TimeoutMonitorTest {
             new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 20.0);
     private final AssignmentManager assignmentManager =
             new AssignmentManager(assignments, resources, claimer, events, clock);
+    private final ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
     private final TimeoutMonitor monitor =
-            new TimeoutMonitor(assignments, assignmentManager, caseManager, clock, TIMEOUT);
+            new TimeoutMonitor(assignments, recovery, clock, TIMEOUT);
 
     // ---------- helpers ----------
 
@@ -146,7 +147,7 @@ public   class TimeoutMonitorTest {
         assertEquals(0, monitor.checkTimeouts());
     }
 
-    // ---------- trips that have answered ----------
+    // ---------- trips that have answered or already ended ----------
 
     @Test
     void aTripThatIsEnRouteNeverTimesOut() {
@@ -160,6 +161,23 @@ public   class TimeoutMonitorTest {
         assertEquals(0, monitor.checkTimeouts());
         assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
         assertEquals(CaseStatus.RESPONDING, reload(c).status());
+    }
+
+    @Test
+    void aTripThatAlreadyFailedIsIgnoredByTheMonitor() {
+        addUnit("als-1", NEAR);
+        Case c = criticalCase("p1");
+        Assignment a = dispatchAndAssign();
+        recovery.onFailed(c.id());                                   // reported as failed before the deadline
+        events.clear();
+
+        clock.advance(Duration.ofSeconds(61));
+
+        assertEquals(0, monitor.checkTimeouts());
+        assertEquals(AssignmentStatus.FAILED, tripStatus(a));        // not overwritten as TIMED_OUT
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+        assertEquals(1, queue.size());                               // queued once, not twice
+        assertTrue(events.published().isEmpty());
     }
 
     // ---------- only overdue trips ----------
@@ -259,18 +277,16 @@ public   class TimeoutMonitorTest {
     @Test
     void constructorRejectsMissingCollaboratorsAndABadTimeout() {
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(null, assignmentManager, caseManager, clock, TIMEOUT));
+                () -> new TimeoutMonitor(null, recovery, clock, TIMEOUT));
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, null, caseManager, clock, TIMEOUT));
+                () -> new TimeoutMonitor(assignments, null, clock, TIMEOUT));
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, assignmentManager, null, clock, TIMEOUT));
+                () -> new TimeoutMonitor(assignments, recovery, null, TIMEOUT));
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, assignmentManager, caseManager, null, TIMEOUT));
+                () -> new TimeoutMonitor(assignments, recovery, clock, null));
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, assignmentManager, caseManager, clock, null));
+                () -> new TimeoutMonitor(assignments, recovery, clock, Duration.ZERO));
         assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, assignmentManager, caseManager, clock, Duration.ZERO));
-        assertThrows(IllegalArgumentException.class,
-                () -> new TimeoutMonitor(assignments, assignmentManager, caseManager, clock, Duration.ofSeconds(-5)));
+                () -> new TimeoutMonitor(assignments, recovery, clock, Duration.ofSeconds(-5)));
     }
 }

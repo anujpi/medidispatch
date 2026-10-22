@@ -309,7 +309,102 @@ public class AssignmentManagerTest {
         assertEquals("case-1", claimer.claimedBy("r1").get());
         assertTrue(events.published().isEmpty());
     }
+    // ---------- onFailed ----------
 
+    @Test
+    void aTripThatFailsBeforeLeavingEndsFailedAndTheUnitGoesOffline() {
+        Assignment a = dispatched("case-1", "r1");
+
+        manager.onFailed("case-1");
+
+        assertEquals(AssignmentStatus.FAILED, tripStatus(a));
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
+        assertTrue(claimer.claimedBy("r1").isEmpty());
+        assertTrue(assignments.findActiveByCaseId("case-1").isEmpty());
+    }
+
+    @Test
+    void aTripThatBreaksDownEnRouteEndsFailedAndTheUnitGoesOffline() {
+        Assignment a = dispatched("case-1", "r1");
+        manager.onEnRoute("case-1");
+
+        manager.onFailed("case-1");
+
+        assertEquals(AssignmentStatus.FAILED, tripStatus(a));
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
+        assertTrue(claimer.claimedBy("r1").isEmpty());
+    }
+
+    @Test
+    void aTripThatFailsAfterArrivalEndsFailedAndTheUnitGoesOffline() {
+        Assignment a = dispatched("case-1", "r1");
+        manager.onEnRoute("case-1");
+        manager.onArrived("case-1");
+
+        manager.onFailed("case-1");
+
+        assertEquals(AssignmentStatus.FAILED, tripStatus(a));
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
+        assertTrue(claimer.claimedBy("r1").isEmpty());
+    }
+
+    @Test
+    void aFailedUnitIsNotOfferedAsAvailable() {
+        dispatched("case-1", "r1");
+
+        manager.onFailed("case-1");
+
+        assertTrue(resources.findAvailableNear(
+                new Location(0, 0), 10.0, Set.of(ResourceType.AMBULANCE_ALS)).isEmpty());
+    }
+
+    @Test
+    void aFailureIsAnnouncedAsAStatusChange() {
+        Assignment a = dispatched("case-1", "r1");
+        manager.onEnRoute("case-1");
+        events.clear();
+
+        manager.onFailed("case-1");
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                                AssignmentStatus.EN_ROUTE, AssignmentStatus.FAILED, NOW)),
+                events.published());
+    }
+
+    @Test
+    void aFinishedTripCannotFail() {
+        dispatched("case-1", "r1");
+        manager.onEnRoute("case-1");
+        manager.onArrived("case-1");
+        manager.complete("case-1");
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.onFailed("case-1"));
+
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("r1"));     // the unit is not taken offline afterwards
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void aFailureOfAnUnknownCaseIsRefused() {
+        assertThrows(IllegalStateException.class, () -> manager.onFailed("ghost"));
+        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(null));
+        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(" "));
+    }
+
+    @Test
+    void aFailedTripLeavesAnAlreadyOfflineUnitOfflineAndStillReleasesTheClaim() {
+        dispatched("case-1", "r1");
+        Resource unit = resources.findById("r1").get();
+        unit.transitionTo(ResourceStatus.OFFLINE);
+        resources.save(unit);
+
+        manager.onFailed("case-1");
+
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
+        assertTrue(claimer.claimedBy("r1").isEmpty());
+    }
     @Test
     void constructorRejectsMissingCollaborators() {
         assertThrows(IllegalArgumentException.class,

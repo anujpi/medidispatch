@@ -13,11 +13,13 @@ public class AssignmentStatusTest {
 
     // The transition table from the spec. This is the source of truth for the tests.
     private static final Map<AssignmentStatus, Set<AssignmentStatus>> ALLOWED = Map.of(
-            ASSIGNED,  EnumSet.of(EN_ROUTE, CANCELLED),
-            EN_ROUTE,  EnumSet.of(ARRIVED, CANCELLED),
-            ARRIVED,   EnumSet.of(DONE, CANCELLED),
+            ASSIGNED,  EnumSet.of(EN_ROUTE, CANCELLED, TIMED_OUT, FAILED),
+            EN_ROUTE,  EnumSet.of(ARRIVED, CANCELLED, FAILED),
+            ARRIVED,   EnumSet.of(DONE, CANCELLED, FAILED),
             DONE,      EnumSet.noneOf(AssignmentStatus.class),
-            CANCELLED, EnumSet.noneOf(AssignmentStatus.class)
+            CANCELLED, EnumSet.noneOf(AssignmentStatus.class),
+            TIMED_OUT, EnumSet.noneOf(AssignmentStatus.class),
+            FAILED,    EnumSet.noneOf(AssignmentStatus.class)
     );
 
     @Test
@@ -46,6 +48,20 @@ public class AssignmentStatusTest {
     }
 
     @Test
+    void aTripCanFailAtAnyStageBeforeItIsFinished() {
+        assertTrue(ASSIGNED.canTransitionTo(FAILED));
+        assertTrue(EN_ROUTE.canTransitionTo(FAILED));
+        assertTrue(ARRIVED.canTransitionTo(FAILED));
+    }
+
+    @Test
+    void onlyATripThatNeverAnsweredCanTimeOut() {
+        assertTrue(ASSIGNED.canTransitionTo(TIMED_OUT));
+        assertFalse(EN_ROUTE.canTransitionTo(TIMED_OUT));
+        assertFalse(ARRIVED.canTransitionTo(TIMED_OUT));
+    }
+
+    @Test
     void skippingStepsIsRefused() {
         assertFalse(ASSIGNED.canTransitionTo(ARRIVED));
         assertFalse(ASSIGNED.canTransitionTo(DONE));
@@ -71,13 +87,17 @@ public class AssignmentStatusTest {
         for (AssignmentStatus to : AssignmentStatus.values()) {
             assertFalse(DONE.canTransitionTo(to));
             assertFalse(CANCELLED.canTransitionTo(to));
+            assertFalse(TIMED_OUT.canTransitionTo(to));
+            assertFalse(FAILED.canTransitionTo(to));
         }
     }
 
     @Test
-    void onlyDoneAndCancelledAreTerminal() {
+    void onlyDoneCancelledTimedOutAndFailedAreTerminal() {
         assertTrue(DONE.isTerminal());
         assertTrue(CANCELLED.isTerminal());
+        assertTrue(TIMED_OUT.isTerminal());
+        assertTrue(FAILED.isTerminal());
         assertFalse(ASSIGNED.isTerminal());
         assertFalse(EN_ROUTE.isTerminal());
         assertFalse(ARRIVED.isTerminal());

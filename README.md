@@ -112,7 +112,7 @@ flowchart TB
         MEM[In-memory adapters<br/>tests and simulator]
     end
     subgraph Core["dispatch-core (pure Java)"]
-        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager]
+        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager, TimeoutMonitor,<br/>ResponseRecovery]
         DOM[Domain<br/>Case, Resource, Assignment,<br/>Patient, scoring, events]
         PORTS[Ports<br/>CaseQueue, ResourceRepository,<br/>ResourceClaimer, PatientRepository,<br/>CaseRepository, AssignmentRepository,<br/>EventPublisher]
     end
@@ -176,15 +176,17 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | Vitals and scoring | `VitalsReading` (validated), `RiskBand`, `RiskAssessment`, `RiskScorer`, a placeholder `SimpleScorer` |
 | Cases | `Case` and `CaseStatus` state machine |
 | Resources | `Resource`, `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
-| Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`) |
+| Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`, `TIMED_OUT`, `FAILED`), so the record says why a trip ended |
 | People | `Patient` |
 | Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `EventPublisher` |
 | Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
-| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends) |
+| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `ResponseRecovery` (one entry point for "this unit is lost": the trip ends and the case goes back to the queue so the next-best unit is sent) |
 
 The full lifecycle works in memory and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, travels, arrives, and is closed. The ambulance is then freed and serves the next waiting patient, and the engine announces every step as an ordered list of events.
 
-**In progress:** timeouts and automatic reassignment. A unit that never acknowledges its assignment is timed out and taken offline, the case returns to the queue, and the next-best unit is sent.
+Failure recovery works in memory: if the nearest ambulance never acknowledges its assignment, the monitor times the trip out, the unit goes offline (so it is never picked again), the case returns to the queue, and the next-best ambulance is sent.
+
+**In progress:** explicit unit failure (`onFailed`, for breakdowns and "cannot complete") is implemented and still needs its tests. After that: live monitoring of units that are en route (stalled or silent), then preemption.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -200,8 +202,8 @@ The full lifecycle works in memory and is covered by a test: a severely abnormal
 - [x] Assignment as an entity with a lifecycle
 - [x] Resource release and case completion
 - [x] Event publisher port and domain events
-- [ ] Timeouts and automatic reassignment
-- [ ] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit
+- [x] Timeouts and automatic reassignment
+- [ ] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit (implemented, tests pending)
 - [ ] Live trip monitoring: a unit that stops moving or loses signal while en route is declared lost and replaced
 - [ ] Preemption of lower-priority responses
 - [ ] Response decider (escalation ladder)
@@ -259,7 +261,7 @@ medidispatch/
     src/main/java/com/medidispatch/core/
       domain/                 Case, Resource, Assignment, Patient, Location, VitalsReading, RiskAssessment, ...
       scoring/                RiskScorer and its implementations
-      engine/                 Dispatcher, CaseManager, AssignmentManager (more to come)
+      engine/                 Dispatcher, CaseManager, AssignmentManager, TimeoutMonitor, ResponseRecovery (more to come)
       event/                  domain events the engine announces
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator
@@ -278,7 +280,8 @@ Every component is covered by tests, including:
 - a **concurrency test**: 100 threads race to claim one ambulance, and exactly one wins,
 - scenario tests for the dispatcher (priority ordering, wrong unit types, units out of range, fallback when a unit is already claimed, retry when none is available),
 - a full-lifecycle test that runs a reading all the way to a closed case and a reused ambulance, and asserts the exact ordered list of events,
-- "nothing happens" tests: repeating an assessment, or attempting an illegal move, changes no state and publishes no events.
+- "nothing happens" tests: repeating an assessment, or attempting an illegal move, changes no state and publishes no events,
+- time-based tests driven by a controllable clock, so "the unit stayed silent for 60 seconds" runs instantly, including the recovery scenario where the nearest ambulance goes silent and the next one is sent.
 
 Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
 

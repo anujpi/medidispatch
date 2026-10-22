@@ -26,47 +26,55 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (all with tests: about 275 tests, 1,150 lines of engine code)
+## Built so far (about 300 tests, about 1,270 lines of engine code)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
-Location (haversine), Patient, Assignment (entity) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED).
+Location (haversine), Patient, Assignment (entity) / AssignmentStatus
+(ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
-AssignmentRepository, EventPublisher.
+AssignmentRepository (incl. findActive()), EventPublisher.
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
-Engine: Dispatcher, CaseManager, AssignmentManager. Scoring: RiskScorer, SimpleScorer (placeholder).
+Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
+TimeoutMonitor, ResponseRecovery. Scoring: RiskScorer, SimpleScorer (placeholder).
+Test helper: MutableClock (a Clock that only moves with advance(Duration)); note it lives in src/main/.../engine
+(it was meant for src/test; consider moving it).
 FullLifecycleTest proves: reading -> score -> case -> dispatch -> trip -> complete -> close, and the freed
-ambulance serves the next patient, with the exact ordered event list.
+ambulance serves the next patient, with the exact ordered event list. TimeoutMonitorTest proves reassignment:
+nearest unit goes silent -> timed out, unit OFFLINE, case requeued -> next unit is sent.
+
+Rules baked in: a unit whose trip TIMED_OUT or FAILED goes OFFLINE (not AVAILABLE) so it is never picked again.
+Recovery for a lost unit always goes through ResponseRecovery (assignment first, then case) so callers cannot
+forget the second step.
 
 Constructor shapes:
 - CaseManager(cases, queue, publisher, clock)
 - Dispatcher(queue, patients, resources, claimer, assignments, publisher, clock, searchRadiusKm)
 - AssignmentManager(assignments, resources, claimer, publisher, clock)
+- ResponseRecovery(assignmentManager, caseManager)
+- TimeoutMonitor(assignments, recovery, clock, ackTimeout)
+
+## Status of the last step (onFailed + ResponseRecovery): code is committed-ready, TESTS ARE MISSING
+Done in main code: FAILED status, AssignmentManager.onFailed, ResponseRecovery, TimeoutMonitor uses it.
+Still to do (in this order):
+1. AssignmentStatusTest is OUT OF DATE: its ALLOWED table has no TIMED_OUT or FAILED, so the all-pairs test
+   fails (and ASSIGNED/EN_ROUTE/ARRIVED rows are missing the new transitions). Update the table and the
+   terminal tests (DONE, CANCELLED, TIMED_OUT, FAILED are terminal).
+2. AssignmentManagerTest: add onFailed tests (from ASSIGNED, EN_ROUTE, ARRIVED; unit ends OFFLINE and unclaimed;
+   event published; refused after DONE and for an unknown case).
+3. ResponseRecoveryTest (new): onFailed while EN_ROUTE and ARRIVED; ordered events (trip change, then case change);
+   breakdown scenario (nearest unit fails, dispatchNext sends the next one); a failed unit is not offered again;
+   onTimedOut behaves the same with TIMED_OUT; no active trip -> throws and changes nothing; validation.
+4. Commit.
 
 Open small items (mine to fix): Dispatcher missing-patient message has no spaces ("Patient "+id+"not found...");
 Dispatcher constructor error message omits assignments/publisher; EventPublisher has no "must not throw" comment;
 SafeEventPublisher (decorator that logs and swallows failures) was designed but not added.
 
-## Current step
-Timeouts and reassignment (spec agreed):
-1. Add TIMED_OUT to AssignmentStatus (ASSIGNED -> TIMED_OUT, terminal); update AssignmentStatusTest table.
-2. AssignmentRepository.findActive() returning a new List of non-terminal assignments (+ in-memory + test).
-3. AssignmentManager.timeOut(caseId): trip -> TIMED_OUT, claim released, unit -> OFFLINE (NOT AVAILABLE, otherwise
-   the same dead unit is picked again forever), event published.
-4. CaseManager.onAssignmentLost(caseId): case RESPONDING -> ALERTED, re-enqueue, event published.
-5. TimeoutMonitor(assignments, assignmentManager, caseManager, clock, ackTimeout).checkTimeouts(): for each active
-   ASSIGNED trip with assignedAt + ackTimeout <= now, timeOut + onAssignmentLost; returns the count. Reassignment is
-   then just the next dispatchNext(). Needs a MutableClock test helper (extends java.time.Clock).
-Key test: two ambulances, the nearest never answers, checkTimeouts, dispatchNext sends the second one.
-
-Right after timeouts (agreed, onFailed will be used a lot):
-- AssignmentManager.onFailed(caseId): explicit failure report (breakdown, can't complete). Probably a FAILED
-  AssignmentStatus (from ASSIGNED, EN_ROUTE, ARRIVED). Trip FAILED, unit OFFLINE, claim released; then the caller
-  (or a small helper) runs CaseManager.onAssignmentLost so the case is requeued. Should also work for the
-  timeout path so the logic lives in one place.
-- Mid-trip monitoring of EN_ROUTE units using location: redirect if the unit is NOT MOVING (stalled) or its SIGNAL
-  IS LOST. Needs Resource to remember when it last reported (lastSeenAt) and a short position history or a
-  "last progress" marker to detect no movement; a monitor (like TimeoutMonitor) calls onFailed when a unit goes
-  silent for N seconds or makes no progress for M seconds. Needs EtaCalculator for overdue-arrival checks.
-
-After that: preemption, ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry
-point), simulator with scorer comparison (inject breakdowns and signal loss), then real scoring (trend, baseline,
-context, NEWS2). Then the Spring layer.
+## Next steps after that
+1. Live trip monitoring of EN_ROUTE units using location: redirect if the unit is NOT MOVING (stalled) or its SIGNAL
+   IS LOST. Needs Resource to remember when it last reported (lastSeenAt) and a way to detect no movement
+   (a "last progress" marker or short position history). A monitor like TimeoutMonitor calls
+   recovery.onFailed. Overdue-arrival checks need an EtaCalculator.
+2. Preemption (a worse case takes a unit already assigned to a lower-risk case; reuse cancel + requeue).
+3. ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry point).
+4. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
+   (trend, baseline, context, NEWS2). Then the Spring layer.

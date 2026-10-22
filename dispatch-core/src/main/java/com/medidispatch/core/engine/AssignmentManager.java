@@ -49,6 +49,7 @@ public class AssignmentManager {
     public void timeOut(String caseId) {
         move(caseId, AssignmentStatus.TIMED_OUT);
     }
+    public void onFailed(String caseId){ move(caseId,AssignmentStatus.FAILED);}
 
     private void move(String caseId, AssignmentStatus next) {
         if (caseId == null || caseId.isBlank()) {
@@ -60,7 +61,7 @@ public class AssignmentManager {
         a.transitionTo(next);                                // an illegal move throws here, before anything changes
         assignments.save(a);
         if (next.isTerminal()) {                             // DONE or CANCELLED: the unit goes back to the pool
-            ResourceStatus after = (next == AssignmentStatus.TIMED_OUT) ? ResourceStatus.OFFLINE : ResourceStatus.AVAILABLE;
+            ResourceStatus after = (next == AssignmentStatus.TIMED_OUT || next == AssignmentStatus.FAILED) ? ResourceStatus.OFFLINE : ResourceStatus.AVAILABLE;
             releaseUnit(a,after);
         }
         publisher.publish(new AssignmentStatusChanged(
