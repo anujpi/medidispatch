@@ -186,7 +186,9 @@ The full lifecycle works in memory and is covered by a test: a severely abnormal
 
 Failure recovery works in memory: if the nearest ambulance never acknowledges its assignment, the monitor times the trip out, the unit goes offline (so it is never picked again), the case returns to the queue, and the next-best ambulance is sent.
 
-**In progress:** explicit unit failure (`onFailed`, for breakdowns and "cannot complete") is implemented and still needs its tests. After that: live monitoring of units that are en route (stalled or silent), then preemption.
+An explicit failure report (`onFailed`, for breakdowns and "cannot complete") follows the same path: the trip ends as `FAILED`, the unit goes offline, and the case is requeued and reassigned.
+
+**In progress:** live monitoring of units that are en route: a unit that stops moving or loses signal is declared lost and replaced. After that: preemption.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -203,7 +205,7 @@ Failure recovery works in memory: if the nearest ambulance never acknowledges it
 - [x] Resource release and case completion
 - [x] Event publisher port and domain events
 - [x] Timeouts and automatic reassignment
-- [ ] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit (implemented, tests pending)
+- [x] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit
 - [ ] Live trip monitoring: a unit that stops moving or loses signal while en route is declared lost and replaced
 - [ ] Preemption of lower-priority responses
 - [ ] Response decider (escalation ladder)

@@ -4,8 +4,13 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
 
 ## How to work with me
 - I'm learning Java and Spring (LLD, HLD, scalable systems) by building this. Act as a tutor.
-- For each step, use this format: **Why** we're building it, **Spec**, **LLD lesson** (principle, what goes
-  wrong otherwise, a check-yourself question), **Tests**, **Decisions for me**.
+- Workflow for every step (when one section is done and we move to the next):
+  1. Talk about what we build next and why.
+  2. Spec: every class needed, its methods, and which package it goes in.
+  3. LLD lesson (principle, what goes wrong otherwise, a check-yourself question), plus **Decisions for me**.
+  4. STOP. Give code only when I ask. Give tests only after that, when I ask.
+  5. When all tests pass, I commit, then we go to the next step.
+  Never dump code or tests unprompted.
 - I type the code myself and run the tests, so explain every new Java feature (lambdas, switch, Optional, etc.)
   in plain words. I'm not comfortable with `::` method references or streams yet, so prefer explicit lambdas
   and plain loops.
@@ -26,7 +31,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (about 300 tests, about 1,270 lines of engine code)
+## Built so far (327 tests, about 1,270 lines of engine code)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
 Location (haversine), Patient, Assignment (entity) / AssignmentStatus
 (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -35,8 +40,8 @@ AssignmentRepository (incl. findActive()), EventPublisher.
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
 Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
 TimeoutMonitor, ResponseRecovery. Scoring: RiskScorer, SimpleScorer (placeholder).
-Test helper: MutableClock (a Clock that only moves with advance(Duration)); note it lives in src/main/.../engine
-(it was meant for src/test; consider moving it).
+Test helper: MutableClock (a Clock that only moves with advance(Duration)). It currently lives in src/main/.../engine
+but only tests use it: move it to src/test/.../engine (small to-do).
 FullLifecycleTest proves: reading -> score -> case -> dispatch -> trip -> complete -> close, and the freed
 ambulance serves the next patient, with the exact ordered event list. TimeoutMonitorTest proves reassignment:
 nearest unit goes silent -> timed out, unit OFFLINE, case requeued -> next unit is sent.
@@ -52,18 +57,11 @@ Constructor shapes:
 - ResponseRecovery(assignmentManager, caseManager)
 - TimeoutMonitor(assignments, recovery, clock, ackTimeout)
 
-## Status of the last step (onFailed + ResponseRecovery): code is committed-ready, TESTS ARE MISSING
-Done in main code: FAILED status, AssignmentManager.onFailed, ResponseRecovery, TimeoutMonitor uses it.
-Still to do (in this order):
-1. AssignmentStatusTest is OUT OF DATE: its ALLOWED table has no TIMED_OUT or FAILED, so the all-pairs test
-   fails (and ASSIGNED/EN_ROUTE/ARRIVED rows are missing the new transitions). Update the table and the
-   terminal tests (DONE, CANCELLED, TIMED_OUT, FAILED are terminal).
-2. AssignmentManagerTest: add onFailed tests (from ASSIGNED, EN_ROUTE, ARRIVED; unit ends OFFLINE and unclaimed;
-   event published; refused after DONE and for an unknown case).
-3. ResponseRecoveryTest (new): onFailed while EN_ROUTE and ARRIVED; ordered events (trip change, then case change);
-   breakdown scenario (nearest unit fails, dispatchNext sends the next one); a failed unit is not offered again;
-   onTimedOut behaves the same with TIMED_OUT; no active trip -> throws and changes nothing; validation.
-4. Commit.
+## Last step: onFailed + ResponseRecovery (DONE, tested)
+FAILED status, AssignmentManager.onFailed, ResponseRecovery (onFailed, onTimedOut), TimeoutMonitor uses it.
+Tests: AssignmentStatusTest updated for TIMED_OUT/FAILED, onFailed tests in AssignmentManagerTest, ResponseRecoveryTest
+(stages, breakdown scenario, retry-loop guard, priority kept, events, refused calls change nothing, known-limit test).
+ResponseRecoveryTest.knownLimit... documents that recovery is two non-atomic steps; rewrite it if recovery becomes atomic.
 
 Open small items (mine to fix): Dispatcher missing-patient message has no spaces ("Patient "+id+"not found...");
 Dispatcher constructor error message omits assignments/publisher; EventPublisher has no "must not throw" comment;
