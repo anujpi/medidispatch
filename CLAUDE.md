@@ -31,7 +31,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (327 tests, about 1,270 lines of engine code)
+## Built so far (354 tests)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
 Location (haversine), Patient, Assignment (entity) / AssignmentStatus
 (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -39,7 +39,9 @@ Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, Pati
 AssignmentRepository (incl. findActive()), EventPublisher.
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
 Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
-TimeoutMonitor, ResponseRecovery. Scoring: RiskScorer, SimpleScorer (placeholder).
+TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery. Scoring: RiskScorer, SimpleScorer (placeholder).
+Resource also tracks lastSeenAt / lastMovedAt via reportLocation(where, at); movement means more than 20 m from the
+last counted position (movedFrom anchor), so GPS jitter is ignored and small steps add up.
 Test helper: MutableClock (a Clock that only moves with advance(Duration)). It currently lives in src/main/.../engine
 but only tests use it: move it to src/test/.../engine (small to-do).
 FullLifecycleTest proves: reading -> score -> case -> dispatch -> trip -> complete -> close, and the freed
@@ -56,6 +58,8 @@ Constructor shapes:
 - AssignmentManager(assignments, resources, claimer, publisher, clock)
 - ResponseRecovery(assignmentManager, caseManager)
 - TimeoutMonitor(assignments, recovery, clock, ackTimeout)
+- UnitTracker(resources, clock)
+- TripMonitor(assignments, resources, recovery, clock, signalTimeout, stallTimeout)
 
 ## Last step: onFailed + ResponseRecovery (DONE, tested)
 FAILED status, AssignmentManager.onFailed, ResponseRecovery (onFailed, onTimedOut), TimeoutMonitor uses it.
@@ -67,12 +71,15 @@ Open small items (mine to fix): Dispatcher missing-patient message has no spaces
 Dispatcher constructor error message omits assignments/publisher; EventPublisher has no "must not throw" comment;
 SafeEventPublisher (decorator that logs and swallows failures) was designed but not added.
 
+## Live trip monitoring (DONE, tested)
+UnitTracker records position reports (facts only); TripMonitor judges EN_ROUTE trips: silent for signalTimeout (30 s
+default) or not moving for stallTimeout (120 s default) -> recovery.onFailed. Both are measured from the later of the
+last report/move and assignedAt, so old data from before the trip is ignored. ASSIGNED trips are TimeoutMonitor's job;
+ARRIVED trips may stand still. Failure reason (signal vs stall) is not recorded yet (a small enum could be added for
+the simulator). Overdue-arrival checks would need an EtaCalculator (not built).
+
 ## Next steps after that
-1. Live trip monitoring of EN_ROUTE units using location: redirect if the unit is NOT MOVING (stalled) or its SIGNAL
-   IS LOST. Needs Resource to remember when it last reported (lastSeenAt) and a way to detect no movement
-   (a "last progress" marker or short position history). A monitor like TimeoutMonitor calls
-   recovery.onFailed. Overdue-arrival checks need an EtaCalculator.
-2. Preemption (a worse case takes a unit already assigned to a lower-risk case; reuse cancel + requeue).
-3. ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry point).
-4. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
+1. Preemption (a worse case takes a unit already assigned to a lower-risk case; reuse cancel + requeue).
+2. ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry point).
+3. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
    (trend, baseline, context, NEWS2). Then the Spring layer.

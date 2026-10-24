@@ -112,7 +112,7 @@ flowchart TB
         MEM[In-memory adapters<br/>tests and simulator]
     end
     subgraph Core["dispatch-core (pure Java)"]
-        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager, TimeoutMonitor,<br/>ResponseRecovery]
+        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager, TimeoutMonitor,<br/>TripMonitor, UnitTracker,<br/>ResponseRecovery]
         DOM[Domain<br/>Case, Resource, Assignment,<br/>Patient, scoring, events]
         PORTS[Ports<br/>CaseQueue, ResourceRepository,<br/>ResourceClaimer, PatientRepository,<br/>CaseRepository, AssignmentRepository,<br/>EventPublisher]
     end
@@ -175,12 +175,12 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 |---|---|
 | Vitals and scoring | `VitalsReading` (validated), `RiskBand`, `RiskAssessment`, `RiskScorer`, a placeholder `SimpleScorer` |
 | Cases | `Case` and `CaseStatus` state machine |
-| Resources | `Resource`, `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
+| Resources | `Resource` (also remembers when a unit last reported and when it last really moved, ignoring 20 m of GPS jitter), `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
 | Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`, `TIMED_OUT`, `FAILED`), so the record says why a trip ended |
 | People | `Patient` |
 | Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `EventPublisher` |
 | Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
-| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `ResponseRecovery` (one entry point for "this unit is lost": the trip ends and the case goes back to the queue so the next-best unit is sent) |
+| Engine | `Dispatcher` (priority-ordered, nearest suitable unit, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `UnitTracker` (records unit position reports), `TripMonitor` (fails an en-route trip when the unit goes silent or stops making progress), `ResponseRecovery` (one entry point for "this unit is lost": the trip ends and the case goes back to the queue so the next-best unit is sent) |
 
 The full lifecycle works in memory and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, travels, arrives, and is closed. The ambulance is then freed and serves the next waiting patient, and the engine announces every step as an ordered list of events.
 
@@ -188,7 +188,9 @@ Failure recovery works in memory: if the nearest ambulance never acknowledges it
 
 An explicit failure report (`onFailed`, for breakdowns and "cannot complete") follows the same path: the trip ends as `FAILED`, the unit goes offline, and the case is requeued and reassigned.
 
-**In progress:** live monitoring of units that are en route: a unit that stops moving or loses signal is declared lost and replaced. After that: preemption.
+Live trip monitoring works in memory: units report their position, and an en-route unit that goes silent (signal lost) or keeps reporting from the same spot (stalled) is declared failed through the same recovery path, so the next-best unit is sent. Signal loss and stalling are separate checks with separate timeouts.
+
+**In progress:** preemption: a worse case can take a unit that is already on its way to a less urgent one.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -206,7 +208,7 @@ An explicit failure report (`onFailed`, for breakdowns and "cannot complete") fo
 - [x] Event publisher port and domain events
 - [x] Timeouts and automatic reassignment
 - [x] Explicit unit failure (`onFailed`): breakdown or "cannot complete" reroutes the case to another unit
-- [ ] Live trip monitoring: a unit that stops moving or loses signal while en route is declared lost and replaced
+- [x] Live trip monitoring: a unit that stops moving or loses signal while en route is declared lost and replaced
 - [ ] Preemption of lower-priority responses
 - [ ] Response decider (escalation ladder)
 - [ ] Single entry point for readings (`VitalsProcessor`)
@@ -263,7 +265,7 @@ medidispatch/
     src/main/java/com/medidispatch/core/
       domain/                 Case, Resource, Assignment, Patient, Location, VitalsReading, RiskAssessment, ...
       scoring/                RiskScorer and its implementations
-      engine/                 Dispatcher, CaseManager, AssignmentManager, TimeoutMonitor, ResponseRecovery (more to come)
+      engine/                 Dispatcher, CaseManager, AssignmentManager, TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (more to come)
       event/                  domain events the engine announces
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator

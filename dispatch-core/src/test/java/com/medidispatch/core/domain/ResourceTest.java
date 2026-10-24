@@ -2,17 +2,99 @@ package com.medidispatch.core.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 public class ResourceTest {
 
     private static final Location BANGALORE = new Location(12.9716, 77.5946);
     private static final Location CHENNAI = new Location(13.0827, 80.2707);
+    private static final Instant T0 = Instant.parse("2026-10-07T12:00:00Z");
+    private static final Location HERE = new Location(0, 0);
+    private static final Location JITTER = new Location(0.0001, 0);    // 11 m away: under the 20 m threshold
+    private static final Location STEP = new Location(0.0002, 0);      // 22 m away: over the threshold
+    private static final Location FAR_AWAY = new Location(0.001, 0);   // 111 m away
 
     private Resource newResource() {
         return new Resource("r1", ResourceType.AMBULANCE_ALS, BANGALORE);
     }
+    private Resource unitAtHere() {
+        return new Resource("r1", ResourceType.AMBULANCE_ALS, HERE);
+    }
+    @Test
+    void aNewResourceHasNeverBeenSeenOrMoved() {
+        Resource r = unitAtHere();
 
+        assertTrue(r.lastSeenAt().isEmpty());
+        assertTrue(r.lastMovedAt().isEmpty());
+    }
+
+    @Test
+    void aBigMoveUpdatesLocationLastSeenAndLastMoved() {
+        Resource r = unitAtHere();
+
+        r.reportLocation(FAR_AWAY, T0);
+
+        assertEquals(FAR_AWAY, r.location());
+        assertEquals(T0, r.lastSeenAt().get());
+        assertEquals(T0, r.lastMovedAt().get());
+    }
+
+    @Test
+    void gpsJitterCountsAsSeenButNotAsMoved() {
+        Resource r = unitAtHere();
+
+        r.reportLocation(JITTER, T0);
+
+        assertEquals(T0, r.lastSeenAt().get());
+        assertTrue(r.lastMovedAt().isEmpty());
+        assertEquals(JITTER, r.location());          // the position is still recorded
+    }
+
+    @Test
+    void smallStepsAddUpAgainstTheLastCountedPosition() {
+        Resource r = unitAtHere();
+
+        r.reportLocation(JITTER, T0);                 // 11 m from the anchor: not movement
+        r.reportLocation(STEP, T0.plusSeconds(10));   // 22 m from the anchor: movement
+
+        assertEquals(T0.plusSeconds(10), r.lastMovedAt().get());
+    }
+
+    @Test
+    void lastMovedAtDoesNotChangeWhileTheUnitStaysPut() {
+        Resource r = unitAtHere();
+        r.reportLocation(FAR_AWAY, T0);
+
+        r.reportLocation(FAR_AWAY, T0.plusSeconds(30));
+
+        assertEquals(T0.plusSeconds(30), r.lastSeenAt().get());
+        assertEquals(T0, r.lastMovedAt().get());      // still the time of the real move
+    }
+
+    @Test
+    void updateLocationResetsTheMovementAnchor() {
+        Resource r = unitAtHere();
+        r.updateLocation(FAR_AWAY);
+
+        // 11 m from the NEW position. Measured from the old anchor (HERE) this would be 122 m.
+        r.reportLocation(new Location(0.0011, 0), T0);
+
+        assertTrue(r.lastMovedAt().isEmpty());
+    }
+
+    @Test
+    void reportLocationRejectsNullsAndChangesNothing() {
+        Resource r = unitAtHere();
+
+        assertThrows(IllegalArgumentException.class, () -> r.reportLocation(null, T0));
+        assertThrows(IllegalArgumentException.class, () -> r.reportLocation(FAR_AWAY, null));
+
+        assertEquals(HERE, r.location());
+        assertTrue(r.lastSeenAt().isEmpty());
+        assertTrue(r.lastMovedAt().isEmpty());
+    }
     // ---------- construction ----------
 
     @Test
@@ -149,4 +231,5 @@ public class ResourceTest {
 
         assertEquals(BANGALORE, r.location());
     }
+
 }
