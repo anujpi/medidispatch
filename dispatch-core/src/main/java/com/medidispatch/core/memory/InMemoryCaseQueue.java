@@ -63,4 +63,11 @@ public class InMemoryCaseQueue implements CaseQueue {
     public int size() {
         return byId.size();
     }
+
+    @Override
+    public Optional<Case> peekNext() {
+        Entry entry = heap.peek();
+        if(entry == null) return Optional.empty();
+        return  Optional.of(entry.caseRef());
+    }
 }

@@ -309,4 +309,53 @@ public class DispatcherTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, -5));
     }
+
+    // ---------- search rings ----------
+
+    @Test
+    void aUnitBeyondTheFirstRingsIsFoundByWidening() {
+        addResource("als-far", ResourceType.AMBULANCE_ALS, FAR);      // 11 km: the 2, 4 and 8 km rings come back empty
+        addCase("case-1", RiskBand.CRITICAL);
+
+        Assignment a = dispatcher.dispatchNext().get();
+
+        assertEquals("als-far", a.resourceId());
+    }
+
+    @Test
+    void aClaimLostInAnInnerRingFallsThroughToALaterRing() {
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);
+        addResource("als-far", ResourceType.AMBULANCE_ALS, FAR);
+        claimer.tryClaim("als-near", "another-case");                 // someone else already holds the near unit
+        addCase("case-1", RiskBand.CRITICAL);
+
+        Assignment a = dispatcher.dispatchNext().get();
+
+        assertEquals("als-far", a.resourceId());
+        assertEquals("another-case", claimer.claimedBy("als-near").get());
+    }
+
+    @Test
+    void aUnitOutsideTheMaximumRadiusIsNeverUsedHoweverFarTheRingsWiden() {
+        addResource("als-way-off", ResourceType.AMBULANCE_ALS, TOO_FAR);
+        addCase("case-1", RiskBand.CRITICAL);
+
+        assertTrue(dispatcher.dispatchNext().isEmpty());
+
+        assertEquals(1, queue.size());                                // the case waits
+        assertEquals(ResourceStatus.AVAILABLE, resources.findById("als-way-off").get().status());
+    }
+
+    @Test
+    void aMaximumRadiusSmallerThanTheFirstRingIsRespected() {
+        Dispatcher tight = new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 1.0);
+        addResource("als-close", ResourceType.AMBULANCE_ALS, new Location(0.005, 0));   // about 0.6 km
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);                      // about 1.1 km: outside 1 km
+        addCase("case-1", RiskBand.CRITICAL);
+
+        assertEquals("als-close", tight.dispatchNext().get().resourceId());
+
+        addCase("case-2", RiskBand.CRITICAL);
+        assertTrue(tight.dispatchNext().isEmpty());                   // als-near is outside the 1 km limit
+    }
 }

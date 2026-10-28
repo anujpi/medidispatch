@@ -323,4 +323,73 @@ public class ResponseRecoveryTest {
         assertThrows(IllegalArgumentException.class, () -> new ResponseRecovery(null, caseManager));
         assertThrows(IllegalArgumentException.class, () -> new ResponseRecovery(assignmentManager, null));
     }
+
+    // ---------- onPreempted ----------
+
+    @Test
+    void aPreemptedTripIsCancelledAndTheHealthyUnitGoesBackToTheFleet() {
+        addUnit("als-1", NEAR);
+        Case c = openCase("p1", RiskBand.HIGH);
+        Assignment a = dispatchAndAssign();
+
+        recovery.onPreempted(c.id());
+
+        assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("als-1"));       // not OFFLINE: the unit is fine
+        assertTrue(claimer.claimedBy("als-1").isEmpty());
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+        assertEquals(1, queue.size());
+    }
+
+    @Test
+    void aTripThatIsEnRouteCanBePreemptedToo() {
+        addUnit("als-1", NEAR);
+        Case c = openCase("p1", RiskBand.HIGH);
+        Assignment a = dispatchAndAssign();
+        assignmentManager.onEnRoute(c.id());
+
+        recovery.onPreempted(c.id());
+
+        assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("als-1"));
+    }
+
+    @Test
+    void aPreemptedCaseCanBeServedAgainByTheSameUnitStraightAway() {
+        addUnit("als-1", NEAR);
+        Case c = openCase("p1", RiskBand.HIGH);
+        dispatchAndAssign();
+        recovery.onPreempted(c.id());
+
+        Assignment again = dispatchAndAssign();
+
+        assertEquals("als-1", again.resourceId());
+        assertEquals(c.id(), again.caseId());
+        assertEquals(CaseStatus.RESPONDING, reload(c).status());
+    }
+
+    @Test
+    void aPreemptionIsAnnouncedAsATripChangeThenACaseChange() {
+        addUnit("als-1", NEAR);
+        Case c = openCase("p1", RiskBand.HIGH);
+        Assignment a = dispatchAndAssign();
+        events.clear();
+
+        recovery.onPreempted(c.id());
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(a.id(), c.id(), "als-1",
+                                AssignmentStatus.ASSIGNED, AssignmentStatus.CANCELLED, NOW),
+                        new CaseStatusChanged(c.id(), "p1",
+                                CaseStatus.RESPONDING, CaseStatus.ALERTED, NOW)),
+                events.published());
+    }
+
+    @Test
+    void preemptingACaseWithNoActiveTripChangesNothing() {
+        assertThrows(IllegalStateException.class, () -> recovery.onPreempted("no-such-case"));
+
+        assertEquals(0, queue.size());
+        assertTrue(events.published().isEmpty());
+    }
 }

@@ -9,4 +9,5 @@ public interface CaseQueue {
     Optional<Case> pollNext();
     boolean remove(String caseId);
     int size();
+    Optional<Case> peekNext();
 }

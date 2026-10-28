@@ -166,4 +166,59 @@ public class InMemoryResourceRepositoryTest {
         assertThrows(IllegalArgumentException.class, () -> repo.findAvailableNear(ORIGIN, 0, nurse));
         assertThrows(IllegalArgumentException.class, () -> repo.findAvailableNear(ORIGIN, -1, nurse));
     }
+
+    // ---------- findAssignedNear ----------
+
+    private Resource assigned(String id, ResourceType type, Location where) {
+        Resource r = resource(id, type, where);
+        r.transitionTo(ResourceStatus.ASSIGNED);
+        repo.save(r);
+        return r;
+    }
+
+    @Test
+    void assignedSearchReturnsOnlyAssignedUnits() {
+        assigned("busy", ResourceType.NURSE, NEAR);
+        resource("free", ResourceType.NURSE, NEAR);
+        Resource offline = resource("offline", ResourceType.NURSE, NEAR);
+        offline.transitionTo(ResourceStatus.OFFLINE);
+        repo.save(offline);
+
+        List<Resource> found = repo.findAssignedNear(ORIGIN, 3.0, Set.of(ResourceType.NURSE));
+
+        assertEquals(List.of("busy"), ids(found));
+    }
+
+    @Test
+    void assignedSearchRespectsRadiusAndType() {
+        assigned("near-nurse", ResourceType.NURSE, NEAR);
+        assigned("far-nurse", ResourceType.NURSE, FAR);
+        assigned("near-courier", ResourceType.COURIER, NEAR);
+
+        List<Resource> found = repo.findAssignedNear(ORIGIN, 3.0, Set.of(ResourceType.NURSE));
+
+        assertEquals(List.of("near-nurse"), ids(found));
+    }
+
+    @Test
+    void assignedSearchIsNearestFirstThenById() {
+        assigned("far", ResourceType.NURSE, FAR);
+        assigned("b", ResourceType.NURSE, NEAR);
+        assigned("a", ResourceType.NURSE, NEAR);
+        assigned("mid", ResourceType.NURSE, MID);
+
+        List<Resource> found = repo.findAssignedNear(ORIGIN, 20.0, Set.of(ResourceType.NURSE));
+
+        assertEquals(List.of("a", "b", "mid", "far"), ids(found));
+    }
+
+    @Test
+    void assignedSearchRejectsBadArguments() {
+        Set<ResourceType> nurse = Set.of(ResourceType.NURSE);
+
+        assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(null, 3.0, nurse));
+        assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(ORIGIN, 3.0, null));
+        assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(ORIGIN, 0, nurse));
+        assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(ORIGIN, -1, nurse));
+    }
 }

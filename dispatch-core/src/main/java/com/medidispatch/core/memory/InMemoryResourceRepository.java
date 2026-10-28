@@ -2,6 +2,7 @@ package com.medidispatch.core.memory;
 
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
+import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.port.ResourceRepository;
 
@@ -31,6 +32,15 @@ public class InMemoryResourceRepository implements ResourceRepository {
 
     @Override
     public List<Resource> findAvailableNear(Location center, double radiusKm, Set<ResourceType> types) {
+        return findNear(ResourceStatus.AVAILABLE,center,radiusKm,types);
+    }
+
+    @Override
+    public List<Resource> findAssignedNear(Location center, double radiusKm, Set<ResourceType> types) {
+        return findNear(ResourceStatus.ASSIGNED,center,radiusKm,types);
+    }
+
+    private List<Resource> findNear(ResourceStatus resourceStatus, Location center, double radiusKm, Set<ResourceType> types) {
         if (center == null) {
             throw new IllegalArgumentException("center is required");
         }
@@ -55,6 +65,6 @@ public class InMemoryResourceRepository implements ResourceRepository {
             result.add(c.resource());
         }
         return result;
-
     }
+
 }

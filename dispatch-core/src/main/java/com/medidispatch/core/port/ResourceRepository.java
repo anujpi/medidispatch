@@ -12,4 +12,5 @@ public interface ResourceRepository {
     void save(Resource resource);
     Optional<Resource> findById(String id);
     List<Resource> findAvailableNear(Location center, double radiusKm, Set<ResourceType> types);
+    List<Resource> findAssignedNear(Location center,double radiusKm,Set<ResourceType> types);
 }

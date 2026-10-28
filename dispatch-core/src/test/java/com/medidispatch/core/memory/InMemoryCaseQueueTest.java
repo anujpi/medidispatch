@@ -165,4 +165,31 @@ public class InMemoryCaseQueueTest {
     void nullIdOnRemoveIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> queue.remove(null));
     }
+
+    // ---------- peekNext ----------
+
+    @Test
+    void peekOnAnEmptyQueueReturnsNothing() {
+        assertTrue(queue.peekNext().isEmpty());
+    }
+
+    @Test
+    void peekShowsTheMostUrgentCaseWithoutRemovingIt() {
+        queue.enqueue(caseOf("low", RiskBand.LOW, T0));
+        queue.enqueue(caseOf("crit", RiskBand.CRITICAL, T0));
+
+        assertEquals("crit", queue.peekNext().get().id());
+        assertEquals("crit", queue.peekNext().get().id());     // still there
+        assertEquals(2, queue.size());
+    }
+
+    @Test
+    void peekFollowsTheSameOrderAsPoll() {
+        queue.enqueue(caseOf("high", RiskBand.HIGH, T0));
+        queue.enqueue(caseOf("crit", RiskBand.CRITICAL, T0));
+
+        assertEquals("crit", queue.peekNext().get().id());
+        assertEquals("crit", queue.pollNext().get().id());
+        assertEquals("high", queue.peekNext().get().id());     // the next one is now in front
+    }
 }

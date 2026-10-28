@@ -21,4 +21,8 @@ public class ResponseRecovery {
         assignmentManager.timeOut(caseId);
         caseManager.onAssignmentLost(caseId);
     }
+    public void onPreempted(String caseId){
+        assignmentManager.cancel(caseId);
+        caseManager.onAssignmentLost(caseId);
+    }
 }

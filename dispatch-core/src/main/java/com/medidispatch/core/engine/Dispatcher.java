@@ -54,29 +54,31 @@ public class Dispatcher {
             queue.enqueue(c);
             throw new IllegalStateException("Patient "+ c.patientId()+ "not found for case" + c.id());
         }
-        // 3 free units of resource suitable type near the patient
-        List<Resource> candidates = resources.findAvailableNear(patient.get().location(),searchRadiusKm,typesFor(c.band()));
-
-        //4 candidates arrive nearest first
+        Location where = patient.get().location();
+        double radius = SearchRings.first(searchRadiusKm);
+        Optional<Assignment> sent = tryAssignWithin(c, where, radius);
+        while (sent.isEmpty() && radius < searchRadiusKm) {
+            radius = SearchRings.next(radius, searchRadiusKm);
+            sent = tryAssignWithin(c, where, radius);
+        }
+        if (sent.isEmpty()) {
+            queue.enqueue(c);
+        }
+        return sent;
+    }
+    private Optional<Assignment> tryAssignWithin(Case c, Location where, double radiusKm) {
+        List<Resource> candidates = resources.findAvailableNear(where, radiusKm, ResponseTypes.forBand(c.band()));
         for (Resource candidate : candidates) {
             if (claimer.tryClaim(candidate.id(), c.id())) {
                 candidate.transitionTo(ResourceStatus.ASSIGNED);
                 resources.save(candidate);
-                Assignment assignment = new Assignment(c.id(),candidate.id(),clock.instant());
+                Assignment assignment = new Assignment(c.id(), candidate.id(), clock.instant());
                 assignments.save(assignment);
                 publisher.publish(new UnitAssigned(assignment.id(), c.id(), candidate.id(), clock.instant()));
                 return Optional.of(assignment);
             }
         }
-        queue.enqueue(c);
         return Optional.empty();
+    }
 
-    }
-    private Set<ResourceType> typesFor(RiskBand band) {
-        return switch (band) {
-            case CRITICAL -> Set.of(ResourceType.AMBULANCE_ALS);
-            case HIGH -> Set.of(ResourceType.AMBULANCE_ALS, ResourceType.AMBULANCE_BLS);
-            case MEDIUM, LOW -> Set.of(ResourceType.NURSE);
-        };
-    }
 }
