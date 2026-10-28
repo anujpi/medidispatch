@@ -31,19 +31,22 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (422 tests)
-Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
-Location (haversine), Patient, Assignment (entity) / AssignmentStatus
-(ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
+## Built so far (463 tests)
+Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
+(AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
+AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
-AssignmentRepository (incl. findActive()), EventPublisher.
-Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
+AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
+EventPublisher.
+Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned (carries the role), AssignmentStatusChanged.
 Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
-TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (incl. onPreempted), Preemptor, DispatchCoordinator,
-helper SearchRings (2, 4, 8, 16 km... capped at the max radius).
+TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (incl. onPreempted), Preemptor, SupportDispatcher,
+DispatchCoordinator, helpers SearchRings (2, 4, 8, 16 km... capped at the max radius) and UnitAssigner
+(package-private: claim + ASSIGNED + save trip + publish UnitAssigned, shared by Dispatcher and SupportDispatcher).
 Scoring: RiskScorer, SimpleScorer (placeholder).
 Response (package response): ResponseDecider (interface: decide(case, patient) -> ResponsePlan), ResponsePlan (record:
-ordered List<ResourceType>, needsUnit(), allowedTypes()), LadderResponseDecider (placeholder ladder).
+primaryTypes + supportTypes, needsUnit(), wantsSupport(), allowedTypes() = primary only; 1-arg constructor = no
+support), LadderResponseDecider (placeholder ladder).
 All main classes have Javadoc (class, constructors, public methods; trivial accessors skipped). Keep it up to date
 when code changes, and document new classes the same way.
 Ports added: CaseQueue.peekNext(), ResourceRepository.findAssignedNear(center, radiusKm, types).
@@ -67,9 +70,13 @@ Constructor shapes:
 - TimeoutMonitor(assignments, recovery, clock, ackTimeout)
 - UnitTracker(resources, clock)
 - TripMonitor(assignments, resources, recovery, clock, signalTimeout, stallTimeout)
-- Preemptor(assignments, cases, resources, claimer, patients, decider, recovery, searchRadiusKm)
-- Tests build both with `new LadderResponseDecider()`.
-- DispatchCoordinator(dispatcher, preemptor, queue)
+- Preemptor(assignments, cases, resources, patients, decider, recovery, searchRadiusKm)   (no claimer any more)
+- SupportDispatcher(cases, patients, resources, claimer, assignments, decider, publisher, clock)
+- DispatchCoordinator(dispatcher, preemptor, supportDispatcher, queue)
+- Assignment(caseId, resourceId, role, assignedAt); UnitAssigned(assignmentId, caseId, resourceId, role, occurredAt)
+- Tests build deciders with `new LadderResponseDecider()`.
+- AssignmentManager and ResponseRecovery methods take an ASSIGNMENT id (not a case id); AssignmentManager methods
+  return the updated Assignment. Tests that only know the case use a per-file helper tripOf(caseId).
 
 ## Last step: onFailed + ResponseRecovery (DONE, tested)
 FAILED status, AssignmentManager.onFailed, ResponseRecovery (onFailed, onTimedOut), TimeoutMonitor uses it.
@@ -114,14 +121,24 @@ the full ring search; a later type is only tried if no unit of an earlier type c
 HIGH [BLS, ALS]; MEDIUM [NURSE]; LOW [] (no unit). A queued case whose plan needs no unit -> case put back +
 IllegalStateException. Preemptor uses plan.allowedTypes(). Later option: "use ALS if the BLS is more than X km further".
 
+## First responders (DONE, tested), the user's idea
+Phase A (refactor, no behaviour change): trips are addressed by assignment id everywhere (AssignmentManager,
+ResponseRecovery, both monitors); Preemptor finds a busy unit's trip via findActiveByResourceId.
+Phase B: CRITICAL plan = primary [ALS], support [DOCTOR, NURSE]; other bands no support.
+DispatchCoordinator.dispatchNext() sends the primary (free unit, else preempt, retry), then
+SupportDispatcher.sendSupportFor(primary), and returns ONLY the primary. Callers call caseManager.onAssigned(primary)
+only; a SUPPORT trip never changes the case status. Support rules: plan.wantsSupport(); at most one active SUPPORT
+trip per case (a replacement ambulance brings no second responder); responder must be STRICTLY closer (straight
+line) than the primary unit; support types tried in plan order, ring search capped at the primary's distance;
+best-effort: never queues, never preempts, finding nobody is normal. ResponseRecovery: losing a SUPPORT trip ends
+only that trip (case not requeued); losing the PRIMARY requeues the case and the responder keeps going.
+AssignmentManager.onArrived(PRIMARY) stands down the case's SUPPORT trip: ARRIVED -> DONE, otherwise CANCELLED;
+the unit is freed. Dispatcher alone (dispatchNext) sends the primary only (older tests use it directly).
+Known limits: "closer" is straight-line (no EtaCalculator); support is only considered when the primary is sent
+(a responder freed a minute later is not sent); first-responder role not recorded in AssignmentStatusChanged.
+Open: COMMUNITY_RESPONDER (volunteers) and support for HIGH cases were deferred.
+
 ## Next steps after that
-1. First responders (multi-unit response), the user's idea: for CRITICAL (maybe HIGH), also send the nearest
-   nurse/doctor to start care before the ambulance. Outline agreed: ResponsePlan gets a support list; new
-   ResourceType DOCTOR (maybe COMMUNITY_RESPONDER); Assignment gets a role (PRIMARY/SUPPORT); trips handled by
-   assignment id instead of case id (big refactor: AssignmentManager, ResponseRecovery, both monitors, Preemptor);
-   losing support never requeues the case, losing the primary does; support is best-effort (no queue, no
-   preemption) and only sent if closer than the primary; closing a case ends all its trips. Open questions: who
-   counts as a responder, which bands, does the nurse leave when the ALS arrives.
-2. VitalsProcessor (single entry point for readings).
-3. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
+1. VitalsProcessor (single entry point for readings: validate -> score -> CaseManager.handle).
+2. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
    (trend, baseline, context, NEWS2). Then the Spring layer.
