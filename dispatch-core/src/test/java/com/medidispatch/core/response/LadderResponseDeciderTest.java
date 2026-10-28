@@ -25,18 +25,18 @@ public class LadderResponseDeciderTest {
 
     @Test
     void criticalGetsOnlyAnAdvancedAmbulance() {
-        assertEquals(List.of(ResourceType.AMBULANCE_ALS), planFor(RiskBand.CRITICAL).unitTypes());
+        assertEquals(List.of(ResourceType.AMBULANCE_ALS), planFor(RiskBand.CRITICAL).primaryTypes());
     }
 
     @Test
     void highTriesABasicAmbulanceBeforeAnAdvancedOne() {
         assertEquals(List.of(ResourceType.AMBULANCE_BLS, ResourceType.AMBULANCE_ALS),
-                planFor(RiskBand.HIGH).unitTypes());
+                planFor(RiskBand.HIGH).primaryTypes());
     }
 
     @Test
     void mediumGetsANurse() {
-        assertEquals(List.of(ResourceType.NURSE), planFor(RiskBand.MEDIUM).unitTypes());
+        assertEquals(List.of(ResourceType.NURSE), planFor(RiskBand.MEDIUM).primaryTypes());
     }
 
     @Test
@@ -59,5 +59,17 @@ public class LadderResponseDeciderTest {
 
         assertThrows(IllegalArgumentException.class, () -> decider.decide(null, PATIENT));
         assertThrows(IllegalArgumentException.class, () -> decider.decide(c, null));
+    }
+
+    @Test
+    void criticalAlsoAsksForADoctorThenANurseAsFirstResponder() {
+        assertEquals(List.of(ResourceType.DOCTOR, ResourceType.NURSE), planFor(RiskBand.CRITICAL).supportTypes());
+    }
+
+    @Test
+    void noOtherBandAsksForAFirstResponder() {
+        assertFalse(planFor(RiskBand.HIGH).wantsSupport());
+        assertFalse(planFor(RiskBand.MEDIUM).wantsSupport());
+        assertFalse(planFor(RiskBand.LOW).wantsSupport());
     }
 }

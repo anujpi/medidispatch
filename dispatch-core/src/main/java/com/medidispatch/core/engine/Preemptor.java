@@ -17,7 +17,8 @@ import java.util.Set;
  *   <li>its trip is ASSIGNED or EN_ROUTE (a crew that has arrived is never taken);</li>
  *   <li>its case is <em>strictly</em> less urgent than the waiting case (equal bands never steal from each
  *       other, so two cases cannot keep taking a unit back and forth);</li>
- *   <li>its type is allowed by the waiting case's {@link com.medidispatch.core.response.ResponsePlan}.</li>
+ *   <li>its type is one of the waiting case's primary types in its
+ *       {@link com.medidispatch.core.response.ResponsePlan}.</li>
  * </ul>
  * The search widens ring by ring around the waiting patient and the nearest ring with a candidate wins.
  * Inside that ring the least urgent case loses its unit first, then the nearest unit, then the trip id.
@@ -27,7 +28,6 @@ public class Preemptor {
     private final AssignmentRepository assignments;
     private final CaseRepository cases;
     private final ResourceRepository resources;
-    private final ResourceClaimer claimer;
     private final PatientRepository patients;
     private final ResponseDecider decider;
     private final ResponseRecovery recovery;
@@ -38,10 +38,9 @@ public class Preemptor {
     /**
      * Creates the preemptor.
      *
-     * @param assignments    where trips are stored
+     * @param assignments    where trips are stored (to find the trip each busy unit is on)
      * @param cases          where cases are stored (to compare urgency)
      * @param resources      where units are stored and searched by location
-     * @param claimer        tells which case holds each unit
      * @param patients       where the waiting patient's location comes from
      * @param decider        decides which unit types the waiting case may take
      * @param recovery       cancels the taken trip and requeues its case
@@ -51,15 +50,14 @@ public class Preemptor {
     public Preemptor(AssignmentRepository assignments,
                      CaseRepository cases,
                      ResourceRepository resources,
-                     ResourceClaimer claimer,
                      PatientRepository patients,
                      ResponseDecider decider,
                      ResponseRecovery recovery,
                      double searchRadiusKm) {
-        if (assignments == null || cases == null || resources == null || claimer == null
+        if (assignments == null || cases == null || resources == null
                 || patients == null || decider == null || recovery == null) {
             throw new IllegalArgumentException(
-                    "assignments, cases, resources, claimer, patients, decider and recovery are required");
+                    "assignments, cases, resources, patients, decider and recovery are required");
         }
         if (searchRadiusKm <= 0) {
             throw new IllegalArgumentException("searchRadiusKm must be positive, got " + searchRadiusKm);
@@ -67,7 +65,6 @@ public class Preemptor {
         this.assignments = assignments;
         this.cases = cases;
         this.resources = resources;
-        this.claimer = claimer;
         this.patients = patients;
         this.decider = decider;
         this.recovery = recovery;
@@ -82,7 +79,7 @@ public class Preemptor {
      *         {@code false} if nothing could be taken, in which case nothing changed
      * @throws IllegalArgumentException if {@code waiting} is missing
      * @throws IllegalStateException    if the waiting patient is missing, or the stored data is inconsistent
-     *                                  (an assigned unit without a claim, an active trip or a case)
+     *                                  (an assigned unit without an active trip, or a trip without its case)
      */
     public boolean makeRoomFor(Case waiting) {
         if (waiting == null) {
@@ -91,7 +88,7 @@ public class Preemptor {
         Patient patient = patients.findById(waiting.patientId())
                 .orElseThrow(() -> new IllegalStateException(
                         "Patient " + waiting.patientId() + " not found for case " + waiting.id()));
-        // any type in the plan may be taken; an empty plan allows nothing, so nothing is taken
+        // any primary type in the plan may be taken; an empty plan allows nothing, so nothing is taken
         Set<ResourceType> allowed = decider.decide(waiting, patient).allowedTypes();
 
         // look close first, widen the ring only while nobody can be taken
@@ -112,23 +109,21 @@ public class Preemptor {
             if (byDistance != 0) return byDistance;
             return x.trip().id().compareTo(y.trip().id());
         });
-        recovery.onPreempted(victims.get(0).victimCase().id());
+        recovery.onPreempted(victims.get(0).trip().id());
         return true;
     }
 
     private List<Victim> victimsWithin(Location center, double radiusKm, RiskBand waitingBand, Set<ResourceType> allowed) {
         List<Victim> victims = new ArrayList<>();
         for (Resource unit : resources.findAssignedNear(center, radiusKm, allowed)) {
-            String caseId = claimer.claimedBy(unit.id())
-                    .orElseThrow(() -> new IllegalStateException("Unit " + unit.id() + " is ASSIGNED but holds no claim"));
-            Assignment trip = assignments.findActiveByCaseId(caseId)
-                    .orElseThrow(() -> new IllegalStateException("No active trip for case " + caseId));
+            Assignment trip = assignments.findActiveByResourceId(unit.id())
+                    .orElseThrow(() -> new IllegalStateException("Unit " + unit.id() + " is ASSIGNED but has no active trip"));
             // a crew that has arrived is with a patient: never take it
             if (trip.status() != AssignmentStatus.ASSIGNED && trip.status() != AssignmentStatus.EN_ROUTE) {
                 continue;
             }
-            Case victimCase = cases.findById(caseId)
-                    .orElseThrow(() -> new IllegalStateException("Case " + caseId + " not found"));
+            Case victimCase = cases.findById(trip.caseId())
+                    .orElseThrow(() -> new IllegalStateException("Case " + trip.caseId() + " not found"));
             if (victimCase.band().compareTo(waitingBand) >= 0) {
                 continue;                                     // only strictly less urgent cases can lose a unit
             }

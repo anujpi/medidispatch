@@ -16,7 +16,7 @@ public class ResponsePlanTest {
     void keepsTheUnitTypesInTheOrderGiven() {
         ResponsePlan plan = new ResponsePlan(List.of(ResourceType.AMBULANCE_BLS, ResourceType.AMBULANCE_ALS));
 
-        assertEquals(List.of(ResourceType.AMBULANCE_BLS, ResourceType.AMBULANCE_ALS), plan.unitTypes());
+        assertEquals(List.of(ResourceType.AMBULANCE_BLS, ResourceType.AMBULANCE_ALS), plan.primaryTypes());
     }
 
     @Test
@@ -39,14 +39,14 @@ public class ResponsePlanTest {
 
         types.add(ResourceType.AMBULANCE_ALS);
 
-        assertEquals(List.of(ResourceType.NURSE), plan.unitTypes());
+        assertEquals(List.of(ResourceType.NURSE), plan.primaryTypes());
     }
 
     @Test
     void thePlanCannotBeChangedFromOutside() {
         ResponsePlan plan = new ResponsePlan(List.of(ResourceType.NURSE));
 
-        assertThrows(UnsupportedOperationException.class, () -> plan.unitTypes().add(ResourceType.COURIER));
+        assertThrows(UnsupportedOperationException.class, () -> plan.primaryTypes().add(ResourceType.COURIER));
     }
 
     @Test
@@ -60,5 +60,56 @@ public class ResponsePlanTest {
     void theSameTypeTwiceIsRejected() {
         assertThrows(IllegalArgumentException.class,
                 () -> new ResponsePlan(List.of(ResourceType.NURSE, ResourceType.NURSE)));
+    }
+
+    // ---------- first responders ----------
+
+    @Test
+    void aPlanCanAlsoListFirstResponderTypesInOrder() {
+        ResponsePlan plan = new ResponsePlan(List.of(ResourceType.AMBULANCE_ALS),
+                List.of(ResourceType.DOCTOR, ResourceType.NURSE));
+
+        assertEquals(List.of(ResourceType.AMBULANCE_ALS), plan.primaryTypes());
+        assertEquals(List.of(ResourceType.DOCTOR, ResourceType.NURSE), plan.supportTypes());
+        assertTrue(plan.wantsSupport());
+    }
+
+    @Test
+    void aPrimaryOnlyPlanWantsNoFirstResponder() {
+        ResponsePlan plan = new ResponsePlan(List.of(ResourceType.NURSE));
+
+        assertTrue(plan.supportTypes().isEmpty());
+        assertFalse(plan.wantsSupport());
+    }
+
+    @Test
+    void allowedTypesOnlyCoverTheMainResponse() {
+        ResponsePlan plan = new ResponsePlan(List.of(ResourceType.AMBULANCE_ALS), List.of(ResourceType.NURSE));
+
+        assertEquals(Set.of(ResourceType.AMBULANCE_ALS), plan.allowedTypes());
+    }
+
+    @Test
+    void aTypeCannotBeBothMainResponseAndFirstResponder() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new ResponsePlan(List.of(ResourceType.NURSE), List.of(ResourceType.NURSE)));
+    }
+
+    @Test
+    void theFirstResponderListIsCheckedLikeTheMainList() {
+        List<ResourceType> als = List.of(ResourceType.AMBULANCE_ALS);
+
+        assertThrows(IllegalArgumentException.class, () -> new ResponsePlan(als, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ResponsePlan(als, Arrays.asList(ResourceType.NURSE, null)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ResponsePlan(als, List.of(ResourceType.NURSE, ResourceType.NURSE)));
+    }
+
+    @Test
+    void theFirstResponderListCannotBeChangedFromOutside() {
+        ResponsePlan plan = new ResponsePlan(List.of(ResourceType.AMBULANCE_ALS), List.of(ResourceType.NURSE));
+
+        assertThrows(UnsupportedOperationException.class, () -> plan.supportTypes().add(ResourceType.DOCTOR));
     }
 }

@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
@@ -110,7 +111,7 @@ public class DispatcherTest {
 
         Assignment a = dispatcher.dispatchNext().get();
 
-        Assignment stored = assignments.findActiveByCaseId("case-1").get();
+        Assignment stored = assignments.findActiveByCaseId("case-1").get(0);
         assertEquals(a.id(), stored.id());
         assertEquals(AssignmentStatus.ASSIGNED, stored.status());
     }
@@ -124,7 +125,7 @@ public class DispatcherTest {
 
         Assignment a = dispatcher.dispatchNext().get();
 
-        assertEquals(List.of(new UnitAssigned(a.id(), "case-1", "als-1", NOW)), events.published());
+        assertEquals(List.of(new UnitAssigned(a.id(), "case-1", "als-1", AssignmentRole.PRIMARY, NOW)), events.published());
     }
 
     @Test

@@ -11,7 +11,7 @@ public class AssignmentTest {
     private static final Instant ASSIGNED_AT = Instant.parse("2026-10-07T12:00:00Z");
 
     private Assignment newAssignment() {
-        return new Assignment("case-1", "r1", ASSIGNED_AT);
+        return new Assignment("case-1", "r1", AssignmentRole.PRIMARY, ASSIGNED_AT);
     }
 
     // ---------- construction ----------
@@ -37,19 +37,19 @@ public class AssignmentTest {
 
     @Test
     void nullOrBlankCaseIdIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new Assignment(null, "r1", ASSIGNED_AT));
-        assertThrows(IllegalArgumentException.class, () -> new Assignment("  ", "r1", ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class, () -> new Assignment(null, "r1", AssignmentRole.PRIMARY, ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class, () -> new Assignment("  ", "r1", AssignmentRole.PRIMARY, ASSIGNED_AT));
     }
 
     @Test
     void nullOrBlankResourceIdIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", null, ASSIGNED_AT));
-        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", " ", ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", null, AssignmentRole.PRIMARY, ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", " ", AssignmentRole.PRIMARY, ASSIGNED_AT));
     }
 
     @Test
     void nullAssignedAtIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", "r1", null));
+        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", "r1", AssignmentRole.PRIMARY, null));
     }
 
     // ---------- transitions ----------
@@ -130,5 +130,19 @@ public class AssignmentTest {
 
         assertThrows(IllegalStateException.class, () -> a.transitionTo(AssignmentStatus.EN_ROUTE));
         assertEquals(AssignmentStatus.CANCELLED, a.status());
+    }
+
+    // ---------- role ----------
+
+    @Test
+    void theRoleIsKept() {
+        assertEquals(AssignmentRole.PRIMARY, newAssignment().role());
+        assertEquals(AssignmentRole.SUPPORT,
+                new Assignment("case-1", "nurse-1", AssignmentRole.SUPPORT, ASSIGNED_AT).role());
+    }
+
+    @Test
+    void aMissingRoleIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", "r1", null, ASSIGNED_AT));
     }
 }

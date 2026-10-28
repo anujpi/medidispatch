@@ -13,7 +13,8 @@ import java.time.Instant;
  * <p>
  * Meant to be called regularly (a scheduled job in the Spring service). Each check looks at trips that are
  * still ASSIGNED; any whose acknowledgement deadline has passed is timed out through
- * {@link ResponseRecovery}, which takes the unit offline and requeues the case so the next unit is sent.
+ * {@link ResponseRecovery}, which takes the unit offline and, if it was the main response, requeues the case
+ * so the next unit is sent. First responders are checked the same way.
  * Trips that are already EN_ROUTE are {@link TripMonitor}'s job.
  */
 public class TimeoutMonitor {
@@ -63,7 +64,7 @@ public class TimeoutMonitor {
             if (deadline.isAfter(now)) {
                 continue;                                      // not due yet (exactly on time counts as due)
             }
-            recovery.onTimedOut(a.caseId());
+            recovery.onTimedOut(a.id());
             handled++;
         }
         return handled;

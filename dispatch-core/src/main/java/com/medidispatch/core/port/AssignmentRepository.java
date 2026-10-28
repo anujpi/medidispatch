@@ -27,12 +27,21 @@ public interface AssignmentRepository {
     Optional<Assignment> findById(String id);
 
     /**
-     * Finds the trip currently serving a case. A case has at most one active trip.
+     * Lists the trips currently serving a case. A case can have several at once (for example an ambulance
+     * and a first responder).
      *
      * @param caseId the case
-     * @return the active trip, or empty if no unit is currently assigned to the case
+     * @return the active trips, empty if no unit is currently assigned to the case
      */
-    Optional<Assignment> findActiveByCaseId(String caseId);
+    List<Assignment> findActiveByCaseId(String caseId);
+
+    /**
+     * Finds the trip a unit is currently on. A unit is on at most one trip at a time.
+     *
+     * @param resourceId the unit
+     * @return the unit's active trip, or empty if it is not on one
+     */
+    Optional<Assignment> findActiveByResourceId(String resourceId);
 
     /**
      * Lists every trip that has not ended; used by the monitors that check trips regularly.

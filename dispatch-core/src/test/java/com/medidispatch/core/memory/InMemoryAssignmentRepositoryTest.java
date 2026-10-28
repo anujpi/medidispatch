@@ -1,10 +1,12 @@
 package com.medidispatch.core.memory;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,7 +17,7 @@ public class InMemoryAssignmentRepositoryTest {
     private final InMemoryAssignmentRepository repo = new InMemoryAssignmentRepository();
 
     private Assignment assignment(String caseId, String resourceId) {
-        return new Assignment(caseId, resourceId, ASSIGNED_AT);
+        return new Assignment(caseId, resourceId, AssignmentRole.PRIMARY, ASSIGNED_AT);
     }
 
     private void finish(Assignment a) {
@@ -48,7 +50,7 @@ public class InMemoryAssignmentRepositoryTest {
         repo.save(a);
         repo.save(a);
 
-        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get().id());
+        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get(0).id());
     }
 
     @Test
@@ -69,7 +71,7 @@ public class InMemoryAssignmentRepositoryTest {
         Assignment a = assignment("case-1", "r1");
         repo.save(a);
 
-        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get().id());
+        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get(0).id());
     }
 
     @Test
@@ -105,7 +107,7 @@ public class InMemoryAssignmentRepositoryTest {
         Assignment current = assignment("case-1", "r2");
         repo.save(current);
 
-        Assignment found = repo.findActiveByCaseId("case-1").get();
+        Assignment found = repo.findActiveByCaseId("case-1").get(0);
 
         assertEquals(current.id(), found.id());
         assertEquals("r2", found.resourceId());
@@ -118,8 +120,56 @@ public class InMemoryAssignmentRepositoryTest {
         repo.save(a);
         repo.save(b);
 
-        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get().id());
-        assertEquals(b.id(), repo.findActiveByCaseId("case-2").get().id());
+        assertEquals(a.id(), repo.findActiveByCaseId("case-1").get(0).id());
+        assertEquals(b.id(), repo.findActiveByCaseId("case-2").get(0).id());
+    }
+
+    @Test
+    void aCaseCanHaveSeveralActiveTripsAtOnce() {                   // an ambulance and a first responder
+        Assignment ambulance = assignment("case-1", "als-1");
+        Assignment nurse = assignment("case-1", "nurse-1");
+        Assignment finished = assignment("case-1", "bls-1");
+        finish(finished);
+        repo.save(ambulance);
+        repo.save(nurse);
+        repo.save(finished);
+
+        List<Assignment> active = repo.findActiveByCaseId("case-1");
+
+        assertEquals(2, active.size());
+        assertTrue(active.contains(ambulance));
+        assertTrue(active.contains(nurse));
+    }
+
+    // ---------- active lookup by unit ----------
+
+    @Test
+    void aUnitsActiveTripIsFoundByItsId() {
+        Assignment a = assignment("case-1", "r1");
+        repo.save(a);
+
+        assertEquals(a.id(), repo.findActiveByResourceId("r1").get().id());
+    }
+
+    @Test
+    void aUnitWhoseTripsHaveAllEndedHasNoActiveTrip() {
+        Assignment old = assignment("case-1", "r1");
+        finish(old);
+        repo.save(old);
+
+        assertTrue(repo.findActiveByResourceId("r1").isEmpty());
+        assertTrue(repo.findActiveByResourceId("never-used").isEmpty());
+    }
+
+    @Test
+    void theUnitsCurrentTripIsFoundEvenIfAnOlderOneEnded() {
+        Assignment old = assignment("case-1", "r1");
+        old.transitionTo(AssignmentStatus.CANCELLED);
+        repo.save(old);
+        Assignment current = assignment("case-2", "r1");
+        repo.save(current);
+
+        assertEquals(current.id(), repo.findActiveByResourceId("r1").get().id());
     }
 
     // ---------- validation ----------
@@ -129,6 +179,7 @@ public class InMemoryAssignmentRepositoryTest {
         assertThrows(IllegalArgumentException.class, () -> repo.save(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findById(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findActiveByCaseId(null));
+        assertThrows(IllegalArgumentException.class, () -> repo.findActiveByResourceId(null));
     }
     // ---------- findActive ----------
 

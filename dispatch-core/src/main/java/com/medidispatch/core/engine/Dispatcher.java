@@ -7,12 +7,11 @@ import com.medidispatch.core.response.ResponseDecider;
 import com.medidispatch.core.response.ResponsePlan;
 
 import java.time.Clock;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * Sends a unit to the most urgent waiting case.
+ * Sends the main-response (PRIMARY) unit to the most urgent waiting case.
  * <p>
  * For each call to {@link #dispatchNext()}: take the most urgent case, ask the {@link ResponseDecider}
  * which unit types it needs (in order of preference), and for each type search in widening rings around
@@ -20,17 +19,15 @@ import java.util.Set;
  * unit of an earlier type can be had within the search radius. The claim is atomic, so two dispatchers
  * never send the same unit. If nobody can be claimed, the case goes back in the queue.
  * <p>
- * It never takes a unit from another case; that is {@link Preemptor}'s job, sequenced by the coordinator.
+ * It never takes a unit from another case ({@link Preemptor}'s job) and never sends first responders
+ * ({@link SupportDispatcher}'s job); {@link DispatchCoordinator} sequences all three.
  */
 public class Dispatcher {
     private final CaseQueue queue;
     private final PatientRepository patients;
     private final ResourceRepository resources;
-    private final ResourceClaimer claimer;
-    private final AssignmentRepository assignments;
     private final ResponseDecider decider;
-    private final EventPublisher publisher;
-    private final Clock clock;
+    private final UnitAssigner assigner;
     private final double searchRadiusKm;
 
     /**
@@ -67,19 +64,16 @@ public class Dispatcher {
         this.queue = queue;
         this.patients = patients;
         this.resources = resources;
-        this.claimer = claimer;
-        this.assignments = assignments;
         this.decider = decider;
-        this.publisher = publisher;
-        this.clock = clock;
+        this.assigner = new UnitAssigner(resources, claimer, assignments, publisher, clock);
         this.searchRadiusKm = searchRadiusKm;
     }
 
     /**
-     * Tries to send a unit to the most urgent waiting case.
+     * Tries to send a main-response unit to the most urgent waiting case.
      * <p>
-     * On success the unit is claimed and ASSIGNED, a new trip is saved and a {@link UnitAssigned} event is
-     * published. The caller should then tell the case manager ({@code CaseManager.onAssigned}).
+     * On success the unit is claimed and ASSIGNED, a new PRIMARY trip is saved and a {@link UnitAssigned}
+     * event is published. The caller should then tell the case manager ({@code CaseManager.onAssigned}).
      *
      * @return the new trip, or empty if the queue is empty or no unit could be claimed (the case is put back)
      * @throws IllegalStateException if the case's patient is missing or its plan sends no unit;
@@ -109,7 +103,7 @@ public class Dispatcher {
 
         // 4. try each unit type in the plan's order; a later type is only tried if no earlier one can be had
         Location where = patient.get().location();
-        for (ResourceType type : plan.unitTypes()) {
+        for (ResourceType type : plan.primaryTypes()) {
             Optional<Assignment> sent = tryTypeInRings(c, where, type);
             if (sent.isPresent()) {
                 return sent;
@@ -133,17 +127,6 @@ public class Dispatcher {
 
     // free units of these types inside this radius, nearest first: claim the first one we win
     private Optional<Assignment> tryAssignWithin(Case c, Location where, double radiusKm, Set<ResourceType> types) {
-        List<Resource> candidates = resources.findAvailableNear(where, radiusKm, types);
-        for (Resource candidate : candidates) {
-            if (claimer.tryClaim(candidate.id(), c.id())) {
-                candidate.transitionTo(ResourceStatus.ASSIGNED);
-                resources.save(candidate);
-                Assignment assignment = new Assignment(c.id(), candidate.id(), clock.instant());
-                assignments.save(assignment);
-                publisher.publish(new UnitAssigned(assignment.id(), c.id(), candidate.id(), clock.instant()));
-                return Optional.of(assignment);
-            }
-        }
-        return Optional.empty();
+        return assigner.assignFirst(c, resources.findAvailableNear(where, radiusKm, types), AssignmentRole.PRIMARY);
     }
 }

@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Location;
@@ -41,7 +42,7 @@ public class AssignmentManagerTest {
         unit.transitionTo(ResourceStatus.ASSIGNED);
         resources.save(unit);
         claimer.tryClaim(resourceId, caseId);
-        Assignment a = new Assignment(caseId, resourceId, NOW);
+        Assignment a = new Assignment(caseId, resourceId, AssignmentRole.PRIMARY, NOW);
         assignments.save(a);
         return a;
     }
@@ -59,13 +60,22 @@ public class AssignmentManagerTest {
         assertTrue(claimer.claimedBy(resourceId).isEmpty());
     }
 
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
+    }
+
     // ---------- progress events ----------
 
     @Test
     void onEnRouteMovesTheTripAndKeepsTheUnitBusy() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
@@ -75,9 +85,9 @@ public class AssignmentManagerTest {
     @Test
     void onArrivedMovesTheTripAndKeepsTheUnitBusy() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
 
-        manager.onArrived("case-1");
+        manager.onArrived(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.ARRIVED, tripStatus(a));
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
@@ -89,10 +99,10 @@ public class AssignmentManagerTest {
     @Test
     void completeFinishesTheTripAndFreesTheUnit() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
 
-        manager.complete("case-1");
+        manager.complete(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.DONE, tripStatus(a));
         assertUnitIsFree("r1");
@@ -102,9 +112,9 @@ public class AssignmentManagerTest {
     @Test
     void aFreedUnitCanBeClaimedByAnotherCase() {
         dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
-        manager.complete("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
+        manager.complete(tripOf("case-1"));
 
         assertTrue(claimer.tryClaim("r1", "case-2"));
     }
@@ -113,7 +123,7 @@ public class AssignmentManagerTest {
     void completeBeforeTheUnitHasArrivedIsRefusedAndChangesNothing() {
         Assignment a = dispatched("case-1", "r1");                  // still ASSIGNED
 
-        assertThrows(IllegalStateException.class, () -> manager.complete("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.complete(tripOf("case-1")));
 
         assertEquals(AssignmentStatus.ASSIGNED, tripStatus(a));
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
@@ -123,11 +133,11 @@ public class AssignmentManagerTest {
     @Test
     void completingTwiceFailsBecauseThereIsNoActiveAssignmentAnyMore() {
         dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
-        manager.complete("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
+        manager.complete(tripOf("case-1"));
 
-        assertThrows(IllegalStateException.class, () -> manager.complete("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.complete(tripOf("case-1")));
     }
 
     // ---------- cancel ----------
@@ -136,7 +146,7 @@ public class AssignmentManagerTest {
     void cancelWorksBeforeTheUnitHasLeft() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
         assertUnitIsFree("r1");
@@ -145,9 +155,9 @@ public class AssignmentManagerTest {
     @Test
     void cancelWorksWhileTheUnitIsEnRoute() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
 
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
         assertUnitIsFree("r1");
@@ -156,10 +166,10 @@ public class AssignmentManagerTest {
     @Test
     void cancelWorksAfterTheUnitHasArrived() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
 
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
         assertUnitIsFree("r1");
@@ -172,7 +182,7 @@ public class AssignmentManagerTest {
         unit.transitionTo(ResourceStatus.OFFLINE);                   // the ambulance broke down
         resources.save(unit);
 
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
         assertTrue(claimer.claimedBy("r1").isEmpty());
@@ -181,9 +191,9 @@ public class AssignmentManagerTest {
     @Test
     void aCancelledTripCannotBeProgressedAgain() {
         dispatched("case-1", "r1");
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
-        assertThrows(IllegalStateException.class, () -> manager.onEnRoute("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.onEnRoute(tripOf("case-1")));
     }
 
     // ---------- other cases are not affected ----------
@@ -192,10 +202,10 @@ public class AssignmentManagerTest {
     void completingOneCaseDoesNotTouchAnotherCasesUnit() {
         dispatched("case-1", "r1");
         dispatched("case-2", "r2");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
 
-        manager.complete("case-1");
+        manager.complete(tripOf("case-1"));
 
         assertUnitIsFree("r1");
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("r2"));
@@ -208,9 +218,9 @@ public class AssignmentManagerTest {
     void everyStepOfTheTripPublishesAStatusChange() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
-        manager.complete("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
+        manager.complete(tripOf("case-1"));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), "case-1", "r1",
@@ -226,7 +236,7 @@ public class AssignmentManagerTest {
     void cancelPublishesAStatusChange() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.cancel("case-1");
+        manager.cancel(tripOf("case-1"));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), "case-1", "r1",
@@ -238,7 +248,7 @@ public class AssignmentManagerTest {
     void aRefusedMovePublishesNothing() {
         dispatched("case-1", "r1");                                 // still ASSIGNED
 
-        assertThrows(IllegalStateException.class, () -> manager.complete("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.complete(tripOf("case-1")));
 
         assertTrue(events.published().isEmpty());
     }
@@ -247,18 +257,18 @@ public class AssignmentManagerTest {
 
     @Test
     void anUnknownCaseFailsForEveryEvent() {
-        assertThrows(IllegalStateException.class, () -> manager.onEnRoute("ghost"));
-        assertThrows(IllegalStateException.class, () -> manager.onArrived("ghost"));
-        assertThrows(IllegalStateException.class, () -> manager.complete("ghost"));
-        assertThrows(IllegalStateException.class, () -> manager.cancel("ghost"));
+        assertThrows(IllegalStateException.class, () -> manager.onEnRoute(tripOf("ghost")));
+        assertThrows(IllegalStateException.class, () -> manager.onArrived(tripOf("ghost")));
+        assertThrows(IllegalStateException.class, () -> manager.complete(tripOf("ghost")));
+        assertThrows(IllegalStateException.class, () -> manager.cancel(tripOf("ghost")));
     }
 
     @Test
     void nullOrBlankCaseIdIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> manager.onEnRoute(null));
-        assertThrows(IllegalArgumentException.class, () -> manager.onArrived("  "));
-        assertThrows(IllegalArgumentException.class, () -> manager.complete(null));
-        assertThrows(IllegalArgumentException.class, () -> manager.cancel(" "));
+        assertThrows(IllegalArgumentException.class, () -> manager.onEnRoute(tripOf(null)));
+        assertThrows(IllegalArgumentException.class, () -> manager.onArrived(tripOf("  ")));
+        assertThrows(IllegalArgumentException.class, () -> manager.complete(tripOf(null)));
+        assertThrows(IllegalArgumentException.class, () -> manager.cancel(tripOf(" ")));
     }
     // ---------- timeOut ----------
 
@@ -266,7 +276,7 @@ public class AssignmentManagerTest {
     void timeOutEndsTheTripTakesTheUnitOfflineAndReleasesTheClaim() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.timeOut("case-1");
+        manager.timeOut(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.TIMED_OUT, tripStatus(a));
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
@@ -278,7 +288,7 @@ public class AssignmentManagerTest {
     void aTimedOutUnitIsNoLongerOfferedAsAvailable() {
         dispatched("case-1", "r1");
 
-        manager.timeOut("case-1");
+        manager.timeOut(tripOf("case-1"));
 
         assertTrue(resources.findAvailableNear(
                 new Location(0, 0), 10.0, Set.of(ResourceType.AMBULANCE_ALS)).isEmpty());
@@ -288,7 +298,7 @@ public class AssignmentManagerTest {
     void timeOutPublishesAStatusChange() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.timeOut("case-1");
+        manager.timeOut(tripOf("case-1"));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), "case-1", "r1",
@@ -299,10 +309,10 @@ public class AssignmentManagerTest {
     @Test
     void aTripThatIsAlreadyEnRouteCannotBeTimedOut() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
         events.clear();
 
-        assertThrows(IllegalStateException.class, () -> manager.timeOut("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.timeOut(tripOf("case-1")));
 
         assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
@@ -315,7 +325,7 @@ public class AssignmentManagerTest {
     void aTripThatFailsBeforeLeavingEndsFailedAndTheUnitGoesOffline() {
         Assignment a = dispatched("case-1", "r1");
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.FAILED, tripStatus(a));
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
@@ -326,9 +336,9 @@ public class AssignmentManagerTest {
     @Test
     void aTripThatBreaksDownEnRouteEndsFailedAndTheUnitGoesOffline() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.FAILED, tripStatus(a));
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
@@ -338,10 +348,10 @@ public class AssignmentManagerTest {
     @Test
     void aTripThatFailsAfterArrivalEndsFailedAndTheUnitGoesOffline() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertEquals(AssignmentStatus.FAILED, tripStatus(a));
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
@@ -352,7 +362,7 @@ public class AssignmentManagerTest {
     void aFailedUnitIsNotOfferedAsAvailable() {
         dispatched("case-1", "r1");
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertTrue(resources.findAvailableNear(
                 new Location(0, 0), 10.0, Set.of(ResourceType.AMBULANCE_ALS)).isEmpty());
@@ -361,10 +371,10 @@ public class AssignmentManagerTest {
     @Test
     void aFailureIsAnnouncedAsAStatusChange() {
         Assignment a = dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
+        manager.onEnRoute(tripOf("case-1"));
         events.clear();
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), "case-1", "r1",
@@ -375,12 +385,12 @@ public class AssignmentManagerTest {
     @Test
     void aFinishedTripCannotFail() {
         dispatched("case-1", "r1");
-        manager.onEnRoute("case-1");
-        manager.onArrived("case-1");
-        manager.complete("case-1");
+        manager.onEnRoute(tripOf("case-1"));
+        manager.onArrived(tripOf("case-1"));
+        manager.complete(tripOf("case-1"));
         events.clear();
 
-        assertThrows(IllegalStateException.class, () -> manager.onFailed("case-1"));
+        assertThrows(IllegalStateException.class, () -> manager.onFailed(tripOf("case-1")));
 
         assertEquals(ResourceStatus.AVAILABLE, unitStatus("r1"));     // the unit is not taken offline afterwards
         assertTrue(events.published().isEmpty());
@@ -388,9 +398,9 @@ public class AssignmentManagerTest {
 
     @Test
     void aFailureOfAnUnknownCaseIsRefused() {
-        assertThrows(IllegalStateException.class, () -> manager.onFailed("ghost"));
-        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(null));
-        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(" "));
+        assertThrows(IllegalStateException.class, () -> manager.onFailed(tripOf("ghost")));
+        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(tripOf(null)));
+        assertThrows(IllegalArgumentException.class, () -> manager.onFailed(tripOf(" ")));
     }
 
     @Test
@@ -400,7 +410,7 @@ public class AssignmentManagerTest {
         unit.transitionTo(ResourceStatus.OFFLINE);
         resources.save(unit);
 
-        manager.onFailed("case-1");
+        manager.onFailed(tripOf("case-1"));
 
         assertEquals(ResourceStatus.OFFLINE, unitStatus("r1"));
         assertTrue(claimer.claimedBy("r1").isEmpty());
@@ -417,5 +427,107 @@ public class AssignmentManagerTest {
                 () -> new AssignmentManager(assignments, resources, claimer, null, clock));
         assertThrows(IllegalArgumentException.class,
                 () -> new AssignmentManager(assignments, resources, claimer, events, null));
+    }
+
+    // ---------- trips by id, and first responders ----------
+
+    // a first responder on the same case, the way the SupportDispatcher leaves it
+    private Assignment supportDispatched(String caseId, String resourceId) {
+        Resource unit = new Resource(resourceId, ResourceType.NURSE, new Location(0, 0));
+        unit.transitionTo(ResourceStatus.ASSIGNED);
+        resources.save(unit);
+        claimer.tryClaim(resourceId, caseId);
+        Assignment a = new Assignment(caseId, resourceId, AssignmentRole.SUPPORT, NOW);
+        assignments.save(a);
+        return a;
+    }
+
+    @Test
+    void everyMoveReturnsTheUpdatedTrip() {
+        Assignment a = dispatched("case-1", "als-1");
+
+        Assignment returned = manager.onEnRoute(a.id());
+
+        assertEquals(a.id(), returned.id());
+        assertEquals(AssignmentStatus.EN_ROUTE, returned.status());
+    }
+
+    @Test
+    void anUnknownTripIdIsRejectedAndNothingChanges() {
+        Assignment a = dispatched("case-1", "als-1");
+
+        assertThrows(IllegalStateException.class, () -> manager.onEnRoute("no-such-trip"));
+
+        assertEquals(AssignmentStatus.ASSIGNED, tripStatus(a));
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void twoTripsOnOneCaseAreMovedIndependently() {
+        Assignment ambulance = dispatched("case-1", "als-1");
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+
+        manager.onEnRoute(nurse.id());
+
+        assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(nurse));
+        assertEquals(AssignmentStatus.ASSIGNED, tripStatus(ambulance));
+    }
+
+    @Test
+    void aFirstResponderArrivingDoesNotTouchTheAmbulance() {
+        Assignment ambulance = dispatched("case-1", "als-1");
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+        manager.onEnRoute(nurse.id());
+
+        manager.onArrived(nurse.id());
+
+        assertEquals(AssignmentStatus.ARRIVED, tripStatus(nurse));
+        assertEquals(AssignmentStatus.ASSIGNED, tripStatus(ambulance));
+    }
+
+    @Test
+    void whenTheAmbulanceArrivesAFirstResponderStillOnTheWayIsCalledOff() {
+        Assignment ambulance = dispatched("case-1", "als-1");
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+        manager.onEnRoute(ambulance.id());
+        manager.onEnRoute(nurse.id());
+
+        manager.onArrived(ambulance.id());
+
+        assertEquals(AssignmentStatus.ARRIVED, tripStatus(ambulance));
+        assertEquals(AssignmentStatus.CANCELLED, tripStatus(nurse));
+        assertUnitIsFree("nurse-1");                                  // free for the next call
+    }
+
+    @Test
+    void whenTheAmbulanceArrivesAFirstResponderAlreadyThereIsDone() {
+        Assignment ambulance = dispatched("case-1", "als-1");
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+        manager.onEnRoute(nurse.id());
+        manager.onArrived(nurse.id());
+        manager.onEnRoute(ambulance.id());
+
+        manager.onArrived(ambulance.id());
+
+        assertEquals(AssignmentStatus.DONE, tripStatus(nurse));
+        assertUnitIsFree("nurse-1");
+    }
+
+    @Test
+    void theStandDownIsAnnouncedAfterTheArrival() {
+        Assignment ambulance = dispatched("case-1", "als-1");
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+        manager.onEnRoute(ambulance.id());
+        manager.onEnRoute(nurse.id());
+        events.clear();
+
+        manager.onArrived(ambulance.id());
+
+        assertEquals(List.of(
+                        new AssignmentStatusChanged(ambulance.id(), "case-1", "als-1",
+                                AssignmentStatus.EN_ROUTE, AssignmentStatus.ARRIVED, NOW),
+                        new AssignmentStatusChanged(nurse.id(), "case-1", "nurse-1",
+                                AssignmentStatus.EN_ROUTE, AssignmentStatus.CANCELLED, NOW)),
+                events.published());
     }
 }

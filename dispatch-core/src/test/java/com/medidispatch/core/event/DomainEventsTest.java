@@ -1,5 +1,6 @@
 package com.medidispatch.core.event;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.RiskBand;
@@ -37,7 +38,7 @@ public class DomainEventsTest {
 
     @Test
     void unitAssignedKeepsItsValues() {
-        UnitAssigned e = new UnitAssigned("a1", "c1", "r1", T);
+        UnitAssigned e = new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, T);
 
         assertEquals("a1", e.assignmentId());
         assertEquals("c1", e.caseId());
@@ -57,13 +58,13 @@ public class DomainEventsTest {
 
     @Test
     void equalEventsAreEqual() {                                   // records compare by value
-        assertEquals(new UnitAssigned("a1", "c1", "r1", T), new UnitAssigned("a1", "c1", "r1", T));
-        assertNotEquals(new UnitAssigned("a1", "c1", "r1", T), new UnitAssigned("a2", "c1", "r1", T));
+        assertEquals(new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, T), new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, T));
+        assertNotEquals(new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, T), new UnitAssigned("a2", "c1", "r1", AssignmentRole.PRIMARY, T));
     }
 
     @Test
     void everyEventIsADomainEvent() {
-        DomainEvent e = new UnitAssigned("a1", "c1", "r1", T);
+        DomainEvent e = new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, T);
 
         assertEquals(T, e.occurredAt());
     }
@@ -100,10 +101,10 @@ public class DomainEventsTest {
 
     @Test
     void unitAssignedRejectsBadValues() {
-        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned(null, "c1", "r1", T));
-        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", " ", "r1", T));
-        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", null, T));
-        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", "r1", null));
+        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned(null, "c1", "r1", AssignmentRole.PRIMARY, T));
+        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", " ", "r1", AssignmentRole.PRIMARY, T));
+        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", null, AssignmentRole.PRIMARY, T));
+        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", "r1", AssignmentRole.PRIMARY, null));
     }
 
     @Test
@@ -120,5 +121,11 @@ public class DomainEventsTest {
                 "a1", "c1", "r1", AssignmentStatus.ASSIGNED, null, T));
         assertThrows(IllegalArgumentException.class, () -> new AssignmentStatusChanged(
                 "a1", "c1", "r1", AssignmentStatus.ASSIGNED, AssignmentStatus.EN_ROUTE, null));
+    }
+
+    @Test
+    void unitAssignedCarriesTheRoleAndRejectsAMissingOne() {
+        assertEquals(AssignmentRole.SUPPORT, new UnitAssigned("a1", "c1", "r1", AssignmentRole.SUPPORT, T).role());
+        assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", "r1", null, T));
     }
 }

@@ -7,47 +7,86 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * What a case gets: the unit types to try, most preferred first. An empty plan means no unit is sent
- * (for example, a self-care prompt).
+ * What a case gets.
+ * <ul>
+ *   <li><b>Primary</b>: the unit types to try for the main response, most preferred first. Empty means no
+ *       unit is sent (for example, a self-care prompt).</li>
+ *   <li><b>Support</b>: first-responder types, most preferred first, sent alongside the primary when one is
+ *       closer. Empty means no first responder.</li>
+ * </ul>
  *
- * @param unitTypes the unit types in order of preference; no nulls, no duplicates; stored as an immutable copy
+ * @param primaryTypes main-response unit types in order of preference; no nulls, no duplicates
+ * @param supportTypes first-responder unit types in order of preference; no nulls, no duplicates,
+ *                     and none that is also a primary type
  */
-public record ResponsePlan(List<ResourceType> unitTypes) {
+public record ResponsePlan(List<ResourceType> primaryTypes, List<ResourceType> supportTypes) {
 
     /**
-     * Validates the plan and makes it immutable.
+     * Validates the plan and makes both lists immutable.
      *
-     * @throws IllegalArgumentException if the list is missing, contains null, or lists a type twice
+     * @throws IllegalArgumentException if a list is missing, contains null or a duplicate,
+     *                                  or a type is in both lists
      */
     public ResponsePlan{
-        if(unitTypes == null){
-            throw new IllegalArgumentException("Unit Types is required");
-        }
-        Set<ResourceType> seen = new HashSet<>();
-        for (ResourceType type : unitTypes) {
-            if (type == null) {
-                throw new IllegalArgumentException("unitTypes cannot contain null");
-            }
-            if (!seen.add(type)) {
-                throw new IllegalArgumentException("unitTypes lists " + type + " twice");
+        checkTypes(primaryTypes, "primaryTypes");
+        checkTypes(supportTypes, "supportTypes");
+        for (ResourceType type : supportTypes) {
+            if (primaryTypes.contains(type)) {
+                throw new IllegalArgumentException(type + " cannot be both a primary and a support type");
             }
         }
-        unitTypes = List.copyOf(unitTypes);
+        primaryTypes = List.copyOf(primaryTypes);
+        supportTypes = List.copyOf(supportTypes);
     }
+
     /**
-     * Says whether any unit should be sent.
+     * A plan with a main response only, no first responder.
      *
-     * @return {@code true} if the plan lists at least one unit type
+     * @param primaryTypes main-response unit types in order of preference
+     */
+    public ResponsePlan(List<ResourceType> primaryTypes) {
+        this(primaryTypes, List.of());
+    }
+
+    /**
+     * Says whether a main-response unit should be sent.
+     *
+     * @return {@code true} if the plan lists at least one primary type
      */
     public boolean needsUnit() {
-        return !unitTypes.isEmpty();
+        return !primaryTypes.isEmpty();
     }
+
     /**
-     * The same types without the order, for callers that only ask "is this type allowed?".
+     * Says whether a first responder should be sent alongside the main response.
      *
-     * @return the allowed unit types
+     * @return {@code true} if the plan lists at least one support type
+     */
+    public boolean wantsSupport() {
+        return !supportTypes.isEmpty();
+    }
+
+    /**
+     * The primary types without the order, for callers that only ask "may this unit serve the case?".
+     *
+     * @return the allowed main-response unit types
      */
     public Set<ResourceType> allowedTypes() {
-        return Set.copyOf(unitTypes);
+        return Set.copyOf(primaryTypes);
+    }
+
+    private static void checkTypes(List<ResourceType> types, String name) {
+        if (types == null) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        Set<ResourceType> seen = new HashSet<>();
+        for (ResourceType type : types) {
+            if (type == null) {
+                throw new IllegalArgumentException(name + " cannot contain null");
+            }
+            if (!seen.add(type)) {
+                throw new IllegalArgumentException(name + " lists " + type + " twice");
+            }
+        }
     }
 }

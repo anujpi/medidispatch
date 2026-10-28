@@ -1,5 +1,6 @@
 package com.medidispatch.core.memory;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.event.DomainEvent;
 import com.medidispatch.core.event.UnitAssigned;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,7 @@ public class InMemoryEventPublisherTest {
     private final InMemoryEventPublisher publisher = new InMemoryEventPublisher();
 
     private DomainEvent event(String assignmentId) {
-        return new UnitAssigned(assignmentId, "case-1", "r1", T);
+        return new UnitAssigned(assignmentId, "case-1", "r1", AssignmentRole.PRIMARY, T);
     }
 
     @Test

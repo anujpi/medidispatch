@@ -10,7 +10,8 @@ import java.util.List;
  * The escalation ladder: send the least capable unit that is enough, so advanced (ALS) ambulances stay
  * free for the worst cases. A <strong>placeholder</strong> table, <strong>not clinical guidance</strong>.
  * <ul>
- *   <li>CRITICAL: ALS only (no fallback; preemption can free an ALS instead).</li>
+ *   <li>CRITICAL: ALS only (no fallback; preemption can free an ALS instead), plus a first responder
+ *       (a doctor, otherwise a nurse) if one is closer than the ambulance.</li>
  *   <li>HIGH: BLS first, ALS only if no BLS can be had.</li>
  *   <li>MEDIUM: a nurse.</li>
  *   <li>LOW: nobody (self-care).</li>
@@ -30,7 +31,8 @@ public class LadderResponseDecider implements ResponseDecider{
             throw new IllegalArgumentException("Case and Patient are required");
         }
         return switch (c.band()){
-            case CRITICAL -> new ResponsePlan(List.of(ResourceType.AMBULANCE_ALS));
+            case CRITICAL -> new ResponsePlan(List.of(ResourceType.AMBULANCE_ALS),
+                                              List.of(ResourceType.DOCTOR, ResourceType.NURSE));
             case HIGH -> new ResponsePlan(List.of(ResourceType.AMBULANCE_BLS, ResourceType.AMBULANCE_ALS));
             case MEDIUM -> new ResponsePlan(List.of(ResourceType.NURSE));
             case LOW -> new ResponsePlan(List.of());

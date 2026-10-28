@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
@@ -98,6 +99,15 @@ public class ResponseRecoveryTest {
         assertEquals(1, queue.size());
     }
 
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
+    }
+
     // ---------- onFailed at every stage ----------
 
     @Test
@@ -106,7 +116,7 @@ public class ResponseRecoveryTest {
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
 
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
 
         assertRecovered(c, a, AssignmentStatus.FAILED);
     }
@@ -116,9 +126,9 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
 
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
 
         assertRecovered(c, a, AssignmentStatus.FAILED);
     }
@@ -128,10 +138,10 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
-        assignmentManager.onArrived(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
+        assignmentManager.onArrived(tripOf(c.id()));
 
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
 
         assertRecovered(c, a, AssignmentStatus.FAILED);
     }
@@ -145,9 +155,9 @@ public class ResponseRecoveryTest {
         Case c = criticalCase("p1");
         Assignment first = dispatchAndAssign();
         assertEquals("als-1", first.resourceId());                   // the nearest unit
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
 
-        recovery.onFailed(c.id());                                   // it breaks down on the way
+        recovery.onFailed(tripOf(c.id()));                                   // it breaks down on the way
         Assignment second = dispatchAndAssign();                     // the dispatcher runs again
 
         assertEquals("als-2", second.resourceId());
@@ -163,7 +173,7 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);                                      // the only unit
         Case c = criticalCase("p1");
         dispatchAndAssign();
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
 
         assertTrue(dispatcher.dispatchNext().isEmpty());
 
@@ -178,7 +188,7 @@ public class ResponseRecoveryTest {
         Assignment a = dispatchAndAssign();                          // the critical case goes first
         assertEquals(critical.id(), a.caseId());
 
-        recovery.onFailed(critical.id());
+        recovery.onFailed(tripOf(critical.id()));
 
         assertEquals(critical.id(), queue.pollNext().get().id());    // ahead of the medium case again
         assertEquals(lessUrgent.id(), queue.pollNext().get().id());
@@ -191,10 +201,10 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
         events.clear();
 
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), c.id(), "als-1",
@@ -212,7 +222,7 @@ public class ResponseRecoveryTest {
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
 
-        recovery.onTimedOut(c.id());
+        recovery.onTimedOut(tripOf(c.id()));
 
         assertRecovered(c, a, AssignmentStatus.TIMED_OUT);
     }
@@ -224,7 +234,7 @@ public class ResponseRecoveryTest {
         Assignment a = dispatchAndAssign();
         events.clear();
 
-        recovery.onTimedOut(c.id());
+        recovery.onTimedOut(tripOf(c.id()));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), c.id(), "als-1",
@@ -239,10 +249,10 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
         events.clear();
 
-        assertThrows(IllegalStateException.class, () -> recovery.onTimedOut(c.id()));
+        assertThrows(IllegalStateException.class, () -> recovery.onTimedOut(tripOf(c.id())));
 
         assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("als-1"));
@@ -258,7 +268,7 @@ public class ResponseRecoveryTest {
         Case c = criticalCase("p1");                                 // alerted and queued, never dispatched
         events.clear();
 
-        assertThrows(IllegalStateException.class, () -> recovery.onFailed(c.id()));
+        assertThrows(IllegalStateException.class, () -> recovery.onFailed(tripOf(c.id())));
 
         assertEquals(CaseStatus.ALERTED, reload(c).status());
         assertEquals(1, queue.size());                               // queued once, not twice
@@ -270,10 +280,10 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         dispatchAndAssign();
-        recovery.onFailed(c.id());
+        recovery.onFailed(tripOf(c.id()));
         events.clear();
 
-        assertThrows(IllegalStateException.class, () -> recovery.onFailed(c.id()));
+        assertThrows(IllegalStateException.class, () -> recovery.onFailed(tripOf(c.id())));
 
         assertEquals(1, queue.size());                               // still queued once
         assertTrue(events.published().isEmpty());
@@ -284,11 +294,11 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
-        assignmentManager.onArrived(c.id());
-        assignmentManager.complete(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
+        assignmentManager.onArrived(tripOf(c.id()));
+        assignmentManager.complete(tripOf(c.id()));
 
-        assertThrows(IllegalStateException.class, () -> recovery.onFailed(c.id()));
+        assertThrows(IllegalStateException.class, () -> recovery.onFailed(tripOf(c.id())));
 
         assertEquals(ResourceStatus.AVAILABLE, unitStatus("als-1"));
     }
@@ -304,7 +314,7 @@ public class ResponseRecoveryTest {
         Case c = criticalCase("p1");
         Assignment a = dispatcher.dispatchNext().get();              // note: no caseManager.onAssigned here
 
-        assertThrows(IllegalStateException.class, () -> recovery.onFailed(c.id()));
+        assertThrows(IllegalStateException.class, () -> recovery.onFailed(tripOf(c.id())));
 
         assertEquals(AssignmentStatus.FAILED, tripStatus(a));        // already changed
     }
@@ -313,10 +323,10 @@ public class ResponseRecoveryTest {
 
     @Test
     void nullOrBlankCaseIdsAreRejected() {
-        assertThrows(IllegalArgumentException.class, () -> recovery.onFailed(null));
-        assertThrows(IllegalArgumentException.class, () -> recovery.onFailed("  "));
-        assertThrows(IllegalArgumentException.class, () -> recovery.onTimedOut(null));
-        assertThrows(IllegalArgumentException.class, () -> recovery.onTimedOut(" "));
+        assertThrows(IllegalArgumentException.class, () -> recovery.onFailed(tripOf(null)));
+        assertThrows(IllegalArgumentException.class, () -> recovery.onFailed(tripOf("  ")));
+        assertThrows(IllegalArgumentException.class, () -> recovery.onTimedOut(tripOf(null)));
+        assertThrows(IllegalArgumentException.class, () -> recovery.onTimedOut(tripOf(" ")));
     }
 
     @Test
@@ -333,7 +343,7 @@ public class ResponseRecoveryTest {
         Case c = openCase("p1", RiskBand.HIGH);
         Assignment a = dispatchAndAssign();
 
-        recovery.onPreempted(c.id());
+        recovery.onPreempted(tripOf(c.id()));
 
         assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
         assertEquals(ResourceStatus.AVAILABLE, unitStatus("als-1"));       // not OFFLINE: the unit is fine
@@ -347,9 +357,9 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = openCase("p1", RiskBand.HIGH);
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
 
-        recovery.onPreempted(c.id());
+        recovery.onPreempted(tripOf(c.id()));
 
         assertEquals(AssignmentStatus.CANCELLED, tripStatus(a));
         assertEquals(ResourceStatus.AVAILABLE, unitStatus("als-1"));
@@ -360,7 +370,7 @@ public class ResponseRecoveryTest {
         addUnit("als-1", NEAR);
         Case c = openCase("p1", RiskBand.HIGH);
         dispatchAndAssign();
-        recovery.onPreempted(c.id());
+        recovery.onPreempted(tripOf(c.id()));
 
         Assignment again = dispatchAndAssign();
 
@@ -376,7 +386,7 @@ public class ResponseRecoveryTest {
         Assignment a = dispatchAndAssign();
         events.clear();
 
-        recovery.onPreempted(c.id());
+        recovery.onPreempted(tripOf(c.id()));
 
         assertEquals(List.of(
                         new AssignmentStatusChanged(a.id(), c.id(), "als-1",
@@ -388,9 +398,68 @@ public class ResponseRecoveryTest {
 
     @Test
     void preemptingACaseWithNoActiveTripChangesNothing() {
-        assertThrows(IllegalStateException.class, () -> recovery.onPreempted("no-such-case"));
+        assertThrows(IllegalStateException.class, () -> recovery.onPreempted(tripOf("no-such-case")));
 
         assertEquals(0, queue.size());
         assertTrue(events.published().isEmpty());
+    }
+
+    // ---------- first responders ----------
+
+    // a first responder on the case, the way the SupportDispatcher leaves it
+    private Assignment firstResponderOn(Case c, String nurseId) {
+        Resource nurse = new Resource(nurseId, ResourceType.NURSE, NEAR);
+        nurse.transitionTo(ResourceStatus.ASSIGNED);
+        resources.save(nurse);
+        claimer.tryClaim(nurseId, c.id());
+        Assignment a = new Assignment(c.id(), nurseId, AssignmentRole.SUPPORT, NOW);
+        assignments.save(a);
+        return a;
+    }
+
+    @Test
+    void losingAFirstResponderEndsOnlyThatTripAndTheCaseKeepsItsAmbulance() {
+        addUnit("als-1", FAR);
+        Case c = criticalCase("p1");
+        Assignment ambulance = dispatchAndAssign();
+        Assignment nurse = firstResponderOn(c, "nurse-1");
+
+        recovery.onFailed(nurse.id());
+
+        assertEquals(AssignmentStatus.FAILED, tripStatus(nurse));
+        assertEquals(ResourceStatus.OFFLINE, unitStatus("nurse-1"));
+        assertEquals(AssignmentStatus.ASSIGNED, tripStatus(ambulance));
+        assertEquals(CaseStatus.RESPONDING, reload(c).status());       // still waiting for its ambulance
+        assertEquals(0, queue.size());                                  // not requeued
+    }
+
+    @Test
+    void aFirstResponderWhoNeverAnswersTimesOutWithoutRequeueingTheCase() {
+        addUnit("als-1", FAR);
+        Case c = criticalCase("p1");
+        dispatchAndAssign();
+        Assignment nurse = firstResponderOn(c, "nurse-1");
+
+        recovery.onTimedOut(nurse.id());
+
+        assertEquals(AssignmentStatus.TIMED_OUT, tripStatus(nurse));
+        assertEquals(CaseStatus.RESPONDING, reload(c).status());
+        assertEquals(0, queue.size());
+    }
+
+    @Test
+    void losingTheAmbulanceRequeuesTheCaseButTheFirstResponderKeepsGoing() {
+        addUnit("als-1", FAR);
+        Case c = criticalCase("p1");
+        Assignment ambulance = dispatchAndAssign();
+        Assignment nurse = firstResponderOn(c, "nurse-1");
+        assignmentManager.onEnRoute(nurse.id());
+
+        recovery.onFailed(ambulance.id());
+
+        assertEquals(AssignmentStatus.FAILED, tripStatus(ambulance));
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+        assertEquals(1, queue.size());
+        assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(nurse));     // care continues while a new ambulance is found
     }
 }

@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.CaseStatus;
@@ -145,7 +146,7 @@ public class CaseManagerTest {
     void aRespondingCaseGetsTheNewBandButStaysOutOfTheQueue() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
         queue.pollNext();                                                    // the dispatcher took it
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         manager.handle(assessment("p1", RiskBand.CRITICAL));
 
@@ -189,7 +190,7 @@ public class CaseManagerTest {
     void onAssignedMovesAnAlertedCaseToResponding() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
 
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         assertEquals(CaseStatus.RESPONDING, reload(c).status());
     }
@@ -197,7 +198,7 @@ public class CaseManagerTest {
     @Test
     void onAssignedForAnUnknownCaseFails() {
         assertThrows(IllegalStateException.class,
-                () -> manager.onAssigned(new Assignment("ghost", "r1", NOW)));
+                () -> manager.onAssigned(new Assignment("ghost", "r1", AssignmentRole.PRIMARY, NOW)));
     }
 
     // ---------- validation ----------
@@ -220,7 +221,7 @@ public class CaseManagerTest {
     @Test
     void onStabilisedMovesARespondingCaseToStabilised() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         manager.onStabilised(c.id());
 
@@ -230,7 +231,7 @@ public class CaseManagerTest {
     @Test
     void closeMovesAStabilisedCaseToClosedAndItIsNoLongerOpen() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
         manager.onStabilised(c.id());
 
         manager.close(c.id());
@@ -242,7 +243,7 @@ public class CaseManagerTest {
     @Test
     void closingACaseThatIsStillRespondingIsRefusedAndChangesNothing() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         assertThrows(IllegalStateException.class, () -> manager.close(c.id()));
 
@@ -312,7 +313,7 @@ public class CaseManagerTest {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
         events.clear();
 
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         assertEquals(List.of(
                         new CaseStatusChanged(c.id(), "p1", CaseStatus.ALERTED, CaseStatus.RESPONDING, NOW)),
@@ -322,7 +323,7 @@ public class CaseManagerTest {
     @Test
     void aRefusedMovePublishesNothing() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
         events.clear();
 
         assertThrows(IllegalStateException.class, () -> manager.close(c.id()));   // RESPONDING cannot close
@@ -335,7 +336,7 @@ public class CaseManagerTest {
     void anAssignmentLostSendsARespondingCaseBackToAlertedAndIntoTheQueue() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
         queue.pollNext();                                                    // the dispatcher took it
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
         assertEquals(0, queue.size());
 
         manager.onAssignmentLost(c.id());
@@ -349,7 +350,7 @@ public class CaseManagerTest {
         Case a = manager.handle(assessment("a", RiskBand.HIGH)).get();
         manager.handle(assessment("b", RiskBand.MEDIUM));
         queue.pollNext();                                                    // a is dispatched
-        manager.onAssigned(new Assignment(a.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(a.id(), "r1", AssignmentRole.PRIMARY, NOW));
 
         manager.onAssignmentLost(a.id());
 
@@ -359,7 +360,7 @@ public class CaseManagerTest {
     @Test
     void anAssignmentLostPublishesAStatusChange() {
         Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
-        manager.onAssigned(new Assignment(c.id(), "r1", NOW));
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
         events.clear();
 
         manager.onAssignmentLost(c.id());

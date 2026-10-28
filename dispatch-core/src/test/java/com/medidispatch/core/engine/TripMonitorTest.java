@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
@@ -80,7 +81,7 @@ public class TripMonitorTest {
     // a case, a unit sent to it, and the crew has set off
     private Assignment enRouteTrip(Case c) {
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
         return a;
     }
 
@@ -98,6 +99,15 @@ public class TripMonitorTest {
 
     private Case reload(Case c) {
         return cases.findById(c.id()).get();
+    }
+
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
     }
 
     // ---------- nothing wrong ----------
@@ -234,7 +244,7 @@ public class TripMonitorTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = enRouteTrip(c);
-        assignmentManager.onArrived(c.id());
+        assignmentManager.onArrived(tripOf(c.id()));
 
         clock.advance(Duration.ofMinutes(10));
 
@@ -338,7 +348,7 @@ public class TripMonitorTest {
 
     @Test
     void aTripWhoseUnitIsMissingIsAnError() {
-        Assignment orphan = new Assignment("case-1", "ghost", clock.instant());
+        Assignment orphan = new Assignment("case-1", "ghost", AssignmentRole.PRIMARY, clock.instant());
         orphan.transitionTo(AssignmentStatus.EN_ROUTE);
         assignments.save(orphan);
 

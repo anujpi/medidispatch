@@ -87,6 +87,15 @@ public class TimeoutMonitorTest {
         return cases.findById(c.id()).get();
     }
 
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
+    }
+
     // ---------- nothing is due ----------
 
     @Test
@@ -155,7 +164,7 @@ public class TimeoutMonitorTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        assignmentManager.onEnRoute(c.id());
+        assignmentManager.onEnRoute(tripOf(c.id()));
 
         clock.advance(Duration.ofMinutes(10));
 
@@ -169,7 +178,7 @@ public class TimeoutMonitorTest {
         addUnit("als-1", NEAR);
         Case c = criticalCase("p1");
         Assignment a = dispatchAndAssign();
-        recovery.onFailed(c.id());                                   // reported as failed before the deadline
+        recovery.onFailed(tripOf(c.id()));                                   // reported as failed before the deadline
         events.clear();
 
         clock.advance(Duration.ofSeconds(61));

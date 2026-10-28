@@ -54,7 +54,7 @@ public class PreemptorTest {
             new AssignmentManager(assignments, resources, claimer, events, clock);
     private final ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
     private final Preemptor preemptor =
-            new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0);
+            new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), recovery, 20.0);
 
     // ---------- helpers ----------
 
@@ -85,6 +85,15 @@ public class PreemptorTest {
 
     private Case reload(Case c) {
         return cases.findById(c.id()).get();
+    }
+
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
     }
 
     // ---------- the basic case ----------
@@ -122,7 +131,7 @@ public class PreemptorTest {
         addUnit("als-1", ResourceType.AMBULANCE_ALS, NEAR);
         Case a = openCase("pa", RiskBand.HIGH);
         Assignment tripA = dispatchAndAssign();
-        assignmentManager.onEnRoute(a.id());
+        assignmentManager.onEnRoute(tripOf(a.id()));
         Case b = openCase("pb", RiskBand.CRITICAL);
 
         assertTrue(preemptor.makeRoomFor(b));
@@ -171,8 +180,8 @@ public class PreemptorTest {
         addUnit("als-1", ResourceType.AMBULANCE_ALS, NEAR);
         Case a = openCase("pa", RiskBand.HIGH);
         Assignment tripA = dispatchAndAssign();
-        assignmentManager.onEnRoute(a.id());
-        assignmentManager.onArrived(a.id());
+        assignmentManager.onEnRoute(tripOf(a.id()));
+        assignmentManager.onArrived(tripOf(a.id()));
         Case b = openCase("pb", RiskBand.CRITICAL);
 
         assertFalse(preemptor.makeRoomFor(b));
@@ -201,7 +210,7 @@ public class PreemptorTest {
         openCase("pa", RiskBand.HIGH);
         Assignment tripA = dispatchAndAssign();
         Case b = openCase("pb", RiskBand.CRITICAL);
-        Preemptor shortReach = new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 5.0);
+        Preemptor shortReach = new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), recovery, 5.0);
 
         assertFalse(shortReach.makeRoomFor(b));
 
@@ -285,10 +294,10 @@ public class PreemptorTest {
     }
 
     @Test
-    void anAssignedUnitThatHoldsNoClaimIsAnInconsistencyNotSomethingToSkip() {
+    void anAssignedUnitWithNoActiveTripIsAnInconsistencyNotSomethingToSkip() {
         Resource orphan = new Resource("als-x", ResourceType.AMBULANCE_ALS, NEAR);
         orphan.transitionTo(ResourceStatus.ASSIGNED);
-        resources.save(orphan);                                         // ASSIGNED, but nobody claimed it
+        resources.save(orphan);                                         // ASSIGNED, but on no trip
         Case b = openCase("pb", RiskBand.CRITICAL);
 
         assertThrows(IllegalStateException.class, () -> preemptor.makeRoomFor(b));
@@ -302,23 +311,21 @@ public class PreemptorTest {
     @Test
     void constructorRejectsMissingCollaboratorsAndABadRadius() {
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(null, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
+                () -> new Preemptor(null, cases, resources, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, null, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
+                () -> new Preemptor(assignments, null, resources, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, null, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
+                () -> new Preemptor(assignments, cases, null, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, null, patients, new LadderResponseDecider(), recovery, 20.0));
+                () -> new Preemptor(assignments, cases, resources, null, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, null, new LadderResponseDecider(), recovery, 20.0));
+                () -> new Preemptor(assignments, cases, resources, patients, null, recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, null, recovery, 20.0));
+                () -> new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), null, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), null, 20.0));
+                () -> new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), recovery, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 0));
-        assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, -5.0));
+                () -> new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), recovery, -5.0));
     }
 
     // ---------- the ladder decides which units may be taken ----------

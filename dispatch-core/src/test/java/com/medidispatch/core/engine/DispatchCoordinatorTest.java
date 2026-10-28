@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
@@ -56,8 +57,10 @@ public class DispatchCoordinatorTest {
             new AssignmentManager(assignments, resources, claimer, events, clock);
     private final ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
     private final Preemptor preemptor =
-            new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0);
-    private final DispatchCoordinator coordinator = new DispatchCoordinator(dispatcher, preemptor, queue);
+            new Preemptor(assignments, cases, resources, patients, new LadderResponseDecider(), recovery, 20.0);
+    private final SupportDispatcher supportDispatcher = new SupportDispatcher(
+            cases, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock);
+    private final DispatchCoordinator coordinator = new DispatchCoordinator(dispatcher, preemptor, supportDispatcher, queue);
 
     // ---------- helpers ----------
 
@@ -166,7 +169,7 @@ public class DispatchCoordinatorTest {
                                 AssignmentStatus.ASSIGNED, AssignmentStatus.CANCELLED, NOW),
                         new CaseStatusChanged(a.id(), "pa",
                                 CaseStatus.RESPONDING, CaseStatus.ALERTED, NOW),
-                        new UnitAssigned(result.id(), b.id(), "als-1", NOW)),
+                        new UnitAssigned(result.id(), b.id(), "als-1", AssignmentRole.PRIMARY, NOW)),
                 events.published());
     }
 
@@ -200,8 +203,85 @@ public class DispatchCoordinatorTest {
 
     @Test
     void constructorRejectsMissingCollaborators() {
-        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(null, preemptor, queue));
-        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(dispatcher, null, queue));
-        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(dispatcher, preemptor, null));
+        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(null, preemptor, supportDispatcher, queue));
+        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(dispatcher, null, supportDispatcher, queue));
+        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(dispatcher, preemptor, supportDispatcher, null));
+    }
+
+    // ---------- first responders ----------
+
+    private void addResponder(String id, ResourceType type, Location where) {
+        resources.save(new Resource(id, type, where));
+    }
+
+    @Test
+    void aCriticalCaseGetsItsAmbulanceAndACloserFirstResponder() {
+        addUnit("als-1", FAR);
+        addResponder("nurse-1", ResourceType.NURSE, NEAR);
+        Case c = openCase("p1", RiskBand.CRITICAL);
+        events.clear();
+
+        Assignment primary = coordinator.dispatchNext().get();
+
+        assertEquals("als-1", primary.resourceId());
+        assertEquals(AssignmentRole.PRIMARY, primary.role());
+        assertEquals(2, assignments.findActiveByCaseId(c.id()).size());
+        Assignment nurseTrip = assignments.findActiveByResourceId("nurse-1").get();
+        assertEquals(AssignmentRole.SUPPORT, nurseTrip.role());
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("nurse-1"));
+        assertEquals(List.of(
+                        new UnitAssigned(primary.id(), c.id(), "als-1", AssignmentRole.PRIMARY, NOW),
+                        new UnitAssigned(nurseTrip.id(), c.id(), "nurse-1", AssignmentRole.SUPPORT, NOW)),
+                events.published());
+    }
+
+    @Test
+    void whenTheAmbulanceArrivesTheFirstResponderIsFreedForTheNextCall() {
+        addUnit("als-1", FAR);
+        addResponder("nurse-1", ResourceType.NURSE, NEAR);
+        openCase("p1", RiskBand.CRITICAL);
+        Assignment primary = coordinator.dispatchNext().get();
+        caseManager.onAssigned(primary);
+
+        assignmentManager.onEnRoute(primary.id());
+        assignmentManager.onArrived(primary.id());
+
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("nurse-1"));
+        assertTrue(assignments.findActiveByResourceId("nurse-1").isEmpty());
+    }
+
+    @Test
+    void aReplacementAmbulanceDoesNotBringASecondFirstResponder() {
+        addUnit("als-1", FAR);
+        addUnit("als-2", new Location(0.15, 0));                      // about 16.7 km
+        addResponder("nurse-1", ResourceType.NURSE, NEAR);
+        addResponder("nurse-2", ResourceType.NURSE, new Location(0.02, 0));
+        Case c = openCase("p1", RiskBand.CRITICAL);
+        Assignment first = coordinator.dispatchNext().get();
+        caseManager.onAssigned(first);
+
+        recovery.onFailed(first.id());                                // the ambulance breaks down
+        Assignment second = coordinator.dispatchNext().get();
+
+        assertEquals("als-2", second.resourceId());
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("nurse-2"));  // nurse-1 is still on the case
+        assertEquals(2, assignments.findActiveByCaseId(c.id()).size());
+    }
+
+    @Test
+    void aHighCaseGetsNoFirstResponder() {
+        addUnit("als-1", FAR);
+        addResponder("nurse-1", ResourceType.NURSE, NEAR);
+        Case c = openCase("p1", RiskBand.HIGH);
+
+        coordinator.dispatchNext();
+
+        assertEquals(1, assignments.findActiveByCaseId(c.id()).size());
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("nurse-1"));
+    }
+
+    @Test
+    void constructorRejectsAMissingSupportDispatcher() {
+        assertThrows(IllegalArgumentException.class, () -> new DispatchCoordinator(dispatcher, preemptor, null, queue));
     }
 }

@@ -1,5 +1,6 @@
 package com.medidispatch.core.engine;
 
+import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Case;
@@ -57,6 +58,15 @@ public class FullLifecycleTest {
         return new VitalsReading(patientId, NOW, 130, 85, 85, null, 30, 39.0, Consciousness.CONFUSED);
     }
 
+    // the id of the case's active trip; for a case with none, an id that matches no trip, so refused calls fail the same way
+    private String tripOf(String caseId) {
+        if (caseId == null || caseId.isBlank()) {
+            return caseId;                                            // let the manager reject it as before
+        }
+        List<Assignment> active = assignments.findActiveByCaseId(caseId);
+        return active.isEmpty() ? "no-trip-for-" + caseId : active.get(0).id();
+    }
+
     @Test
     void theSameAmbulanceServesTwoPatientsOneAfterTheOther() {
         patients.save(new Patient("p1", new Location(0, 0)));
@@ -67,8 +77,8 @@ public class FullLifecycleTest {
         Case c1 = caseManager.handle(scorer.assess(criticalReading("p1"))).get();
         Assignment a1 = dispatcher.dispatchNext().get();
         caseManager.onAssigned(a1);
-        assignmentManager.onEnRoute(c1.id());
-        assignmentManager.onArrived(c1.id());
+        assignmentManager.onEnRoute(tripOf(c1.id()));
+        assignmentManager.onArrived(tripOf(c1.id()));
         assertEquals("als-1", a1.resourceId());
 
         // patient 2 gets critical while the only ambulance is busy: nothing to send, so the case waits
@@ -78,7 +88,7 @@ public class FullLifecycleTest {
 
         // patient 1 is stabilised and the case closes: the ambulance comes back
         caseManager.onStabilised(c1.id());
-        assignmentManager.complete(c1.id());
+        assignmentManager.complete(tripOf(c1.id()));
         caseManager.close(c1.id());
 
         assertEquals(CaseStatus.CLOSED, cases.findById(c1.id()).get().status());
@@ -95,7 +105,7 @@ public class FullLifecycleTest {
         // the whole story, as the engine announced it, in order
         assertEquals(List.of(
                         new CaseStatusChanged(c1.id(), "p1", CaseStatus.MONITORING, CaseStatus.ALERTED, NOW),
-                        new UnitAssigned(a1.id(), c1.id(), "als-1", NOW),
+                        new UnitAssigned(a1.id(), c1.id(), "als-1", AssignmentRole.PRIMARY, NOW),
                         new CaseStatusChanged(c1.id(), "p1", CaseStatus.ALERTED, CaseStatus.RESPONDING, NOW),
                         new AssignmentStatusChanged(a1.id(), c1.id(), "als-1",
                                 AssignmentStatus.ASSIGNED, AssignmentStatus.EN_ROUTE, NOW),
@@ -106,7 +116,7 @@ public class FullLifecycleTest {
                         new AssignmentStatusChanged(a1.id(), c1.id(), "als-1",
                                 AssignmentStatus.ARRIVED, AssignmentStatus.DONE, NOW),
                         new CaseStatusChanged(c1.id(), "p1", CaseStatus.STABILISED, CaseStatus.CLOSED, NOW),
-                        new UnitAssigned(a2.id(), c2.id(), "als-1", NOW)),
+                        new UnitAssigned(a2.id(), c2.id(), "als-1", AssignmentRole.PRIMARY, NOW)),
                 events.published());
     }
 
@@ -118,7 +128,7 @@ public class FullLifecycleTest {
         Case c = caseManager.handle(scorer.assess(criticalReading("p1"))).get();
         Assignment a = dispatcher.dispatchNext().get();
 
-        assignmentManager.cancel(c.id());                       // e.g. the crew never responded
+        assignmentManager.cancel(tripOf(c.id()));                       // e.g. the crew never responded
 
         assertEquals(ResourceStatus.AVAILABLE, resources.findById("als-1").get().status());
         assertTrue(claimer.claimedBy("als-1").isEmpty());
@@ -126,7 +136,7 @@ public class FullLifecycleTest {
 
         assertEquals(List.of(
                         new CaseStatusChanged(c.id(), "p1", CaseStatus.MONITORING, CaseStatus.ALERTED, NOW),
-                        new UnitAssigned(a.id(), c.id(), "als-1", NOW),
+                        new UnitAssigned(a.id(), c.id(), "als-1", AssignmentRole.PRIMARY, NOW),
                         new AssignmentStatusChanged(a.id(), c.id(), "als-1",
                                 AssignmentStatus.ASSIGNED, AssignmentStatus.CANCELLED, NOW)),
                 events.published());

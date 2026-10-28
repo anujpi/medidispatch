@@ -106,7 +106,8 @@ public class CaseManager {
     }
 
     /**
-     * A unit was assigned to the case: ALERTED to RESPONDING. Call it with every new assignment.
+     * A unit was assigned to the case: ALERTED to RESPONDING. Call it with every new main-response (PRIMARY)
+     * assignment; a first responder does not change the case's status.
      *
      * @param assignment the new trip
      * @throws IllegalArgumentException if {@code assignment} is missing

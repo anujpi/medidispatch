@@ -8,7 +8,7 @@ import java.util.*;
 /**
  * In-memory {@link AssignmentRepository} for tests and the simulator. Not thread-safe.
  * <p>
- * The "active" lookups scan every trip ever stored; a database adapter would index by status and case.
+ * The "active" lookups scan every trip ever stored; a database adapter would index by status, case and unit.
  */
 public class InMemoryAssignmentRepository implements AssignmentRepository {
 
@@ -31,12 +31,26 @@ public class InMemoryAssignmentRepository implements AssignmentRepository {
     }
 
     @Override
-    public Optional<Assignment> findActiveByCaseId(String caseId) {
+    public List<Assignment> findActiveByCaseId(String caseId) {
         if (caseId == null) {
             throw new IllegalArgumentException("caseId is required");
         }
+        List<Assignment> active = new ArrayList<>();
         for (Assignment a : byId.values()) {
             if (a.caseId().equals(caseId) && !a.status().isTerminal()) {
+                active.add(a);
+            }
+        }
+        return active;
+    }
+
+    @Override
+    public Optional<Assignment> findActiveByResourceId(String resourceId) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException("resourceId is required");
+        }
+        for (Assignment a : byId.values()) {
+            if (a.resourceId().equals(resourceId) && !a.status().isTerminal()) {
                 return Optional.of(a);
             }
         }

@@ -21,7 +21,8 @@ import java.util.Optional;
  *   <li><b>stalled</b>: reports keep coming but the unit has not really moved for {@code stallTimeout}.</li>
  * </ul>
  * Both are measured from the later of the unit's last report or move and the trip's start, so data from
- * before the trip is ignored. A failed trip goes through {@link ResponseRecovery#onFailed(String)}.
+ * before the trip is ignored. A failed trip goes through {@link ResponseRecovery#onFailed(String)}, by its
+ * assignment id.
  * Only EN_ROUTE trips are checked: ASSIGNED trips are {@link TimeoutMonitor}'s job, and an ARRIVED crew is
  * supposed to stand still.
  */
@@ -83,7 +84,7 @@ public class TripMonitor {
             boolean stalled = !stationarySince.plus(stallTimeout).isAfter(now);
 
             if (signalLost || stalled) {
-                recovery.onFailed(a.caseId());
+                recovery.onFailed(a.id());
                 handled++;
             }
         }
