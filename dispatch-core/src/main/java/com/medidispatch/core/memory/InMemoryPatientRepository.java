@@ -7,6 +7,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * In-memory {@link PatientRepository} for tests and the simulator. Not thread-safe.
+ */
 public class InMemoryPatientRepository implements PatientRepository {
     private final Map<String,Patient> byId = new HashMap<>();
     @Override

@@ -7,6 +7,12 @@ import com.medidispatch.core.port.CaseQueue;
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * In-memory {@link CaseQueue} for tests and the simulator. Not thread-safe.
+ * <p>
+ * A {@link PriorityQueue} keeps the most urgent case on top, and a map by case id makes "is this case
+ * queued?" and replacing a re-ranked case quick. Both structures are always updated together.
+ */
 public class InMemoryCaseQueue implements CaseQueue {
 
     private static int compare(Entry a, Entry b) {

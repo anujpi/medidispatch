@@ -16,6 +16,7 @@ import com.medidispatch.core.event.CaseBandChanged;
 import com.medidispatch.core.event.CaseStatusChanged;
 import com.medidispatch.core.memory.*;
 import com.medidispatch.core.scoring.SimpleScorer;
+import com.medidispatch.core.response.LadderResponseDecider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -395,7 +396,7 @@ public class CaseManagerTest {
         InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
         InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
         SimpleScorer scorer = new SimpleScorer(clock);
-        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, assignments,events, clock, 20.0);
+        Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(),events, clock, 20.0);
 
         patients.save(new Patient("p1", new Location(0, 0)));
         resources.save(new Resource("als-1", ResourceType.AMBULANCE_ALS, new Location(0.01, 0)));

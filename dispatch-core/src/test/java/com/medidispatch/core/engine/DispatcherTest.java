@@ -17,6 +17,9 @@ import com.medidispatch.core.memory.InMemoryEventPublisher;
 import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
+import com.medidispatch.core.response.LadderResponseDecider;
+import com.medidispatch.core.response.ResponseDecider;
+import com.medidispatch.core.response.ResponsePlan;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -46,7 +49,7 @@ public class DispatcherTest {
     private final InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
     private final InMemoryEventPublisher events = new InMemoryEventPublisher();
     private final Dispatcher dispatcher =
-            new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 20.0);
+            new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20.0);
 
     // ---------- helpers ----------
 
@@ -291,23 +294,25 @@ public class DispatcherTest {
     @Test
     void constructorRejectsMissingCollaboratorsAndBadRadius() {
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(null, patients, resources, claimer, assignments, events, clock, 20));
+                () -> new Dispatcher(null, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, null, resources, claimer, assignments, events, clock, 20));
+                () -> new Dispatcher(queue, null, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, null, claimer, assignments, events, clock, 20));
+                () -> new Dispatcher(queue, patients, null, claimer, assignments, new LadderResponseDecider(), events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, null, assignments, events, clock, 20));
+                () -> new Dispatcher(queue, patients, resources, null, assignments, new LadderResponseDecider(), events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, null, events, clock, 20));
+                () -> new Dispatcher(queue, patients, resources, claimer, null, new LadderResponseDecider(), events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, assignments, null, clock, 20));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, null, events, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, assignments, events, null, 20));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), null, clock, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 0));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, null, 20));
         assertThrows(IllegalArgumentException.class,
-                () -> new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, -5));
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, -5));
     }
 
     // ---------- search rings ----------
@@ -348,7 +353,7 @@ public class DispatcherTest {
 
     @Test
     void aMaximumRadiusSmallerThanTheFirstRingIsRespected() {
-        Dispatcher tight = new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 1.0);
+        Dispatcher tight = new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 1.0);
         addResource("als-close", ResourceType.AMBULANCE_ALS, new Location(0.005, 0));   // about 0.6 km
         addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);                      // about 1.1 km: outside 1 km
         addCase("case-1", RiskBand.CRITICAL);
@@ -357,5 +362,86 @@ public class DispatcherTest {
 
         addCase("case-2", RiskBand.CRITICAL);
         assertTrue(tight.dispatchNext().isEmpty());                   // als-near is outside the 1 km limit
+    }
+
+    // ---------- the response ladder ----------
+
+    @Test
+    void highCasePrefersABlsEvenWhenAnAlsIsNearer() {
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);
+        addResource("bls-far", ResourceType.AMBULANCE_BLS, FAR);
+        addCase("case-1", RiskBand.HIGH);
+
+        assertEquals("bls-far", dispatcher.dispatchNext().get().resourceId());
+
+        assertEquals(ResourceStatus.AVAILABLE, resources.findById("als-near").get().status());   // kept free
+    }
+
+    @Test
+    void highCaseFallsBackToAnAlsWhenNoBlsIsInRange() {
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);
+        addResource("bls-way-off", ResourceType.AMBULANCE_BLS, TOO_FAR);
+        addCase("case-1", RiskBand.HIGH);
+
+        assertEquals("als-near", dispatcher.dispatchNext().get().resourceId());
+    }
+
+    @Test
+    void highCaseFallsBackToAnAlsWhenTheOnlyBlsIsClaimedByAnotherCase() {
+        addResource("bls-near", ResourceType.AMBULANCE_BLS, NEAR);
+        addResource("als-far", ResourceType.AMBULANCE_ALS, FAR);
+        claimer.tryClaim("bls-near", "another-case");
+        addCase("case-1", RiskBand.HIGH);
+
+        assertEquals("als-far", dispatcher.dispatchNext().get().resourceId());
+    }
+
+    @Test
+    void theAlsIsStillFreeForTheCriticalCaseThatArrivesNext() {
+        addResource("als-1", ResourceType.AMBULANCE_ALS, NEAR);
+        addResource("bls-1", ResourceType.AMBULANCE_BLS, FAR);
+        addCase("high-case", RiskBand.HIGH);
+        Assignment forHigh = dispatcher.dispatchNext().get();
+
+        addCase("critical-case", RiskBand.CRITICAL);
+        Assignment forCritical = dispatcher.dispatchNext().get();
+
+        assertEquals("bls-1", forHigh.resourceId());
+        assertEquals("als-1", forCritical.resourceId());
+    }
+
+    @Test
+    void criticalCaseDoesNotFallBackToABls() {
+        addResource("bls-near", ResourceType.AMBULANCE_BLS, NEAR);
+        addCase("case-1", RiskBand.CRITICAL);
+
+        assertTrue(dispatcher.dispatchNext().isEmpty());
+
+        assertEquals(1, queue.size());                                // it waits (preemption may help it)
+        assertEquals(ResourceStatus.AVAILABLE, resources.findById("bls-near").get().status());
+    }
+
+    @Test
+    void theDispatcherFollowsWhateverOrderTheDeciderGives() {
+        ResponseDecider nurseFirst = (c, p) -> new ResponsePlan(List.of(ResourceType.NURSE, ResourceType.AMBULANCE_ALS));
+        Dispatcher custom = new Dispatcher(queue, patients, resources, claimer, assignments, nurseFirst, events, clock, 20.0);
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);
+        addResource("nurse-far", ResourceType.NURSE, FAR);
+        addCase("case-1", RiskBand.CRITICAL);
+
+        assertEquals("nurse-far", custom.dispatchNext().get().resourceId());
+    }
+
+    @Test
+    void aQueuedCaseWhosePlanSendsNoUnitIsADataErrorAndTheCaseIsKept() {
+        ResponseDecider nobody = (c, p) -> new ResponsePlan(List.of());
+        Dispatcher broken = new Dispatcher(queue, patients, resources, claimer, assignments, nobody, events, clock, 20.0);
+        addResource("als-near", ResourceType.AMBULANCE_ALS, NEAR);
+        addCase("case-1", RiskBand.CRITICAL);
+
+        assertThrows(IllegalStateException.class, () -> broken.dispatchNext());
+
+        assertEquals(1, queue.size());                                // not lost
+        assertEquals(ResourceStatus.AVAILABLE, resources.findById("als-near").get().status());
     }
 }

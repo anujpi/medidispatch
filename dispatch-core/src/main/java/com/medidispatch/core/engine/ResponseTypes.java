@@ -4,7 +4,7 @@ import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.RiskBand;
 
 import java.util.Set;
-
+//No more in use
 final class ResponseTypes {
     private ResponseTypes() {}
     static Set<ResourceType> forBand(RiskBand Band){

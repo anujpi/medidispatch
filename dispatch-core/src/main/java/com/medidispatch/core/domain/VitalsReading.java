@@ -2,6 +2,23 @@ package com.medidispatch.core.domain;
 
 import java.time.Instant;
 
+/**
+ * One set of vital signs for a patient, taken at a single moment.
+ * <p>
+ * Only the patient, the time and the consciousness level are required. Every measurement is optional
+ * ({@code null} means "not measured"), because real devices do not always send everything. Values that
+ * are present are range-checked, so an impossible reading never enters the engine.
+ *
+ * @param patientId     the patient the reading belongs to; never blank
+ * @param timeStamp     when the reading was taken
+ * @param heartRate     beats per minute, 0 to 300
+ * @param spo2          blood oxygen saturation in percent, 0 to 100
+ * @param systolicBp    systolic blood pressure in mmHg, 30 to 300
+ * @param diastolicBp   diastolic blood pressure in mmHg, 10 to 200, never above the systolic value
+ * @param respRate      breaths per minute, 0 to 45
+ * @param temperature   body temperature in degrees Celsius, 25 to 45
+ * @param consciousness level of consciousness on the ACVPU scale
+ */
 public record VitalsReading(String patientId,
                             Instant timeStamp,
                             Integer heartRate,
@@ -11,6 +28,12 @@ public record VitalsReading(String patientId,
                             Integer respRate,
                             Double temperature,
                             Consciousness consciousness) {
+   /**
+    * Validates the reading.
+    *
+    * @throws IllegalArgumentException if a required field is missing, the patient id is blank,
+    *                                  or a measurement is outside its allowed range
+    */
    public VitalsReading{
        if(patientId !=null && patientId.isBlank()){
            throw new IllegalArgumentException("PatientId cant be empty");
@@ -24,11 +47,7 @@ public record VitalsReading(String patientId,
        if(systolicBp != null && (systolicBp < 30 || systolicBp > 300)){
         throw  new IllegalArgumentException("SystolicBp must be 30 - 300 , got"+systolicBp);
        }
-       // cant really put this in one if cuz systolicBp can produce null condition and to fix that
-       // i need to write another line in the condition , so its better to just keep them separate
-//       if(diastolicBp != null && (diastolicBp < 10 || diastolicBp > 200) || (diastolicBp != null && systolicBp != null && diastolicBp > systolicBp)){
-//           throw new IllegalArgumentException(diastolicBp > systolicBp ?"DiastolicBp cant be higher than systolicBp":"DiastolicBp must be 10 - 200, got"+diastolicBp);
-//       }
+//      }
        if (diastolicBp != null && (diastolicBp < 10 || diastolicBp > 200)) {
            throw new IllegalArgumentException("DiastolicBp must be 10 - 200, got " + diastolicBp);
        }

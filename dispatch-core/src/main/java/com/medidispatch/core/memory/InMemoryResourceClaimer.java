@@ -6,6 +6,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * In-memory {@link ResourceClaimer} for tests and the simulator.
+ * <p>
+ * Thread-safe: claims live in a {@link ConcurrentHashMap} and {@code putIfAbsent} makes each claim one
+ * atomic step, so racing dispatchers can never both win the same unit. Claiming a unit again for the case
+ * that already holds it succeeds, so a retry is harmless.
+ */
 public class InMemoryResourceClaimer implements ResourceClaimer {
     private final Map<String,String> claims = new ConcurrentHashMap<>();
     @Override

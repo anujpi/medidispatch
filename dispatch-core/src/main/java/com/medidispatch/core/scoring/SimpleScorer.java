@@ -9,6 +9,14 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * A <strong>placeholder</strong> scorer with made-up thresholds. <strong>Not clinical guidance.</strong>
+ * <p>
+ * It exists so the rest of the engine can be built and tested before real scoring arrives. It adds points
+ * for each abnormal measurement (low SpO2, abnormal heart rate, fast breathing, low systolic BP, fever,
+ * reduced consciousness) and maps the total to a band: 7+ CRITICAL, 5+ HIGH, 3+ MEDIUM, otherwise LOW.
+ * Missing measurements add nothing. It will be replaced by a NEWS2-based scorer.
+ */
 public class SimpleScorer implements RiskScorer {
 
     private static final int SPO2_LOW = 94;
@@ -20,10 +28,21 @@ public class SimpleScorer implements RiskScorer {
 
     private final Clock clock;
 
+    /**
+     * Creates the scorer.
+     *
+     * @param clock source of the assessment time
+     */
     public SimpleScorer(Clock clock) {
         this.clock = clock;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Every point added is listed in the assessment's factors with its reason, for example
+     * "SpO2 90 below 94 (+2)".
+     */
     @Override
     public RiskAssessment assess(VitalsReading reading) {
         int score = 0;

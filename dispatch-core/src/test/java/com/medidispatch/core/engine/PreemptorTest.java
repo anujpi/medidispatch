@@ -18,6 +18,7 @@ import com.medidispatch.core.memory.InMemoryEventPublisher;
 import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
+import com.medidispatch.core.response.LadderResponseDecider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -48,12 +49,12 @@ public class PreemptorTest {
 
     private final CaseManager caseManager = new CaseManager(cases, queue, events, clock);
     private final Dispatcher dispatcher =
-            new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 20.0);
+            new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20.0);
     private final AssignmentManager assignmentManager =
             new AssignmentManager(assignments, resources, claimer, events, clock);
     private final ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
     private final Preemptor preemptor =
-            new Preemptor(assignments, cases, resources, claimer, patients, recovery, 20.0);
+            new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0);
 
     // ---------- helpers ----------
 
@@ -200,7 +201,7 @@ public class PreemptorTest {
         openCase("pa", RiskBand.HIGH);
         Assignment tripA = dispatchAndAssign();
         Case b = openCase("pb", RiskBand.CRITICAL);
-        Preemptor shortReach = new Preemptor(assignments, cases, resources, claimer, patients, recovery, 5.0);
+        Preemptor shortReach = new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 5.0);
 
         assertFalse(shortReach.makeRoomFor(b));
 
@@ -301,20 +302,38 @@ public class PreemptorTest {
     @Test
     void constructorRejectsMissingCollaboratorsAndABadRadius() {
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(null, cases, resources, claimer, patients, recovery, 20.0));
+                () -> new Preemptor(null, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, null, resources, claimer, patients, recovery, 20.0));
+                () -> new Preemptor(assignments, null, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, null, claimer, patients, recovery, 20.0));
+                () -> new Preemptor(assignments, cases, null, claimer, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, null, patients, recovery, 20.0));
+                () -> new Preemptor(assignments, cases, resources, null, patients, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, null, recovery, 20.0));
+                () -> new Preemptor(assignments, cases, resources, claimer, null, new LadderResponseDecider(), recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, null, 20.0));
+                () -> new Preemptor(assignments, cases, resources, claimer, patients, null, recovery, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, recovery, 0));
+                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), null, 20.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Preemptor(assignments, cases, resources, claimer, patients, recovery, -5.0));
+                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, -5.0));
+    }
+
+    // ---------- the ladder decides which units may be taken ----------
+
+    @Test
+    void aHighCaseMayTakeABlsFromACaseThatImprovedWhileResponding() {
+        addUnit("bls-1", ResourceType.AMBULANCE_BLS, NEAR);
+        Case a = openCase("pa", RiskBand.HIGH);
+        Assignment tripA = dispatchAndAssign();                         // bls-1
+        caseManager.handle(new RiskAssessment("pa", 0, RiskBand.MEDIUM, List.of(), NOW));
+        assertEquals(RiskBand.MEDIUM, reload(a).band());
+        Case b = openCase("pb", RiskBand.HIGH);
+
+        assertTrue(preemptor.makeRoomFor(b));                           // BLS is on b's ladder, a is now less urgent
+
+        assertEquals(AssignmentStatus.CANCELLED, tripStatus(tripA));
     }
 }

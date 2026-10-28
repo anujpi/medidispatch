@@ -22,6 +22,7 @@ import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
 import com.medidispatch.core.scoring.SimpleScorer;
+import com.medidispatch.core.response.LadderResponseDecider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -47,7 +48,7 @@ public class FullLifecycleTest {
     private final SimpleScorer scorer = new SimpleScorer(clock);
     private final CaseManager caseManager = new CaseManager(cases, queue, events, clock);
     private final Dispatcher dispatcher =
-            new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 20.0);
+            new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20.0);
     private final AssignmentManager assignmentManager =
             new AssignmentManager(assignments, resources, claimer, events, clock);
 

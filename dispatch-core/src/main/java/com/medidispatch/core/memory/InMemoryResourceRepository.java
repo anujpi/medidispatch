@@ -8,6 +8,12 @@ import com.medidispatch.core.port.ResourceRepository;
 
 import java.util.*;
 
+/**
+ * In-memory {@link ResourceRepository} for tests and the simulator. Not thread-safe.
+ * <p>
+ * The "near" searches check every stored unit, so they get slower as the fleet grows. That is fine here;
+ * a real adapter answers the same questions with a spatial index (Redis GEO, PostGIS).
+ */
 public class InMemoryResourceRepository implements ResourceRepository {
 
     private final Map<String,Resource> byId = new HashMap<>();
@@ -40,6 +46,7 @@ public class InMemoryResourceRepository implements ResourceRepository {
         return findNear(ResourceStatus.ASSIGNED,center,radiusKm,types);
     }
 
+    // shared by both searches: same rules, only the wanted status differs
     private List<Resource> findNear(ResourceStatus resourceStatus, Location center, double radiusKm, Set<ResourceType> types) {
         if (center == null) {
             throw new IllegalArgumentException("center is required");
@@ -53,7 +60,7 @@ public class InMemoryResourceRepository implements ResourceRepository {
         //keep only resources that pass all three checks
         List<Candidate> found = new ArrayList<>();
         for(Resource r: byId.values()){
-            if (!r.isAvailable()) continue;               // must be free
+            if (r.status()!=resourceStatus) continue;               // must be free
             if (!types.contains(r.type())) continue;      // must be a requested type
             double distance = center.distanceKmTo(r.location());
             if (distance > radiusKm) continue;            // must be within range (edge is included)

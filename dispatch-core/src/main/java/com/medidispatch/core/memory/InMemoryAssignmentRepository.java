@@ -5,6 +5,11 @@ import com.medidispatch.core.port.AssignmentRepository;
 
 import java.util.*;
 
+/**
+ * In-memory {@link AssignmentRepository} for tests and the simulator. Not thread-safe.
+ * <p>
+ * The "active" lookups scan every trip ever stored; a database adapter would index by status and case.
+ */
 public class InMemoryAssignmentRepository implements AssignmentRepository {
 
     private final Map<String, Assignment> byId = new HashMap<>();

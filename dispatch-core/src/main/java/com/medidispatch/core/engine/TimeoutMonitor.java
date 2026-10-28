@@ -8,13 +8,29 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 
-// will be repeatedly called in the spring application
+/**
+ * Gives up on units that never acknowledge their assignment.
+ * <p>
+ * Meant to be called regularly (a scheduled job in the Spring service). Each check looks at trips that are
+ * still ASSIGNED; any whose acknowledgement deadline has passed is timed out through
+ * {@link ResponseRecovery}, which takes the unit offline and requeues the case so the next unit is sent.
+ * Trips that are already EN_ROUTE are {@link TripMonitor}'s job.
+ */
 public class TimeoutMonitor {
     private final AssignmentRepository assignments;
     private final ResponseRecovery recovery;
     private final Clock clock;
     private final Duration ackTimeout;
 
+    /**
+     * Creates the monitor.
+     *
+     * @param assignments where trips are stored
+     * @param recovery    handles a timed-out trip and its case
+     * @param clock       source of the current time
+     * @param ackTimeout  how long a unit has to acknowledge; must be positive
+     * @throws IllegalArgumentException if an argument is missing or the timeout is not positive
+     */
     public TimeoutMonitor(AssignmentRepository assignments,
                           ResponseRecovery recovery,
                           Clock clock,
@@ -31,7 +47,11 @@ public class TimeoutMonitor {
         this.ackTimeout = ackTimeout;
     }
 
-    // returns how many assignments were timed out
+    /**
+     * Times out every ASSIGNED trip whose deadline has passed. Exactly on the deadline counts as passed.
+     *
+     * @return how many trips were timed out
+     */
     public int checkTimeouts() {
         Instant now = clock.instant();
         int handled = 0;

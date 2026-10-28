@@ -7,6 +7,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * In-memory {@link CaseRepository} for tests and the simulator. Not thread-safe.
+ * <p>
+ * {@link #findOpenByPatientId(String)} scans every case; a database adapter would use an index instead.
+ */
 public class InMemoryCaseRepository implements CaseRepository {
 
     private final Map<String,Case> byId = new HashMap<>();

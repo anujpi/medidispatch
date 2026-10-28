@@ -21,6 +21,7 @@ import com.medidispatch.core.memory.InMemoryEventPublisher;
 import com.medidispatch.core.memory.InMemoryPatientRepository;
 import com.medidispatch.core.memory.InMemoryResourceClaimer;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
+import com.medidispatch.core.response.LadderResponseDecider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -50,12 +51,12 @@ public class DispatchCoordinatorTest {
 
     private final CaseManager caseManager = new CaseManager(cases, queue, events, clock);
     private final Dispatcher dispatcher =
-            new Dispatcher(queue, patients, resources, claimer, assignments, events, clock, 20.0);
+            new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events, clock, 20.0);
     private final AssignmentManager assignmentManager =
             new AssignmentManager(assignments, resources, claimer, events, clock);
     private final ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
     private final Preemptor preemptor =
-            new Preemptor(assignments, cases, resources, claimer, patients, recovery, 20.0);
+            new Preemptor(assignments, cases, resources, claimer, patients, new LadderResponseDecider(), recovery, 20.0);
     private final DispatchCoordinator coordinator = new DispatchCoordinator(dispatcher, preemptor, queue);
 
     // ---------- helpers ----------

@@ -11,6 +11,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * Watches units that are on their way and fails the trip when a unit goes silent or stops making progress.
+ * <p>
+ * Meant to be called regularly (a scheduled job in the Spring service). Two separate checks, because a
+ * stuck ambulance with working GPS is not silent:
+ * <ul>
+ *   <li><b>signal lost</b>: no position report for {@code signalTimeout};</li>
+ *   <li><b>stalled</b>: reports keep coming but the unit has not really moved for {@code stallTimeout}.</li>
+ * </ul>
+ * Both are measured from the later of the unit's last report or move and the trip's start, so data from
+ * before the trip is ignored. A failed trip goes through {@link ResponseRecovery#onFailed(String)}.
+ * Only EN_ROUTE trips are checked: ASSIGNED trips are {@link TimeoutMonitor}'s job, and an ARRIVED crew is
+ * supposed to stand still.
+ */
 public class TripMonitor {
     private final AssignmentRepository assignments;
     private final ResourceRepository resource;
@@ -19,6 +33,17 @@ public class TripMonitor {
     private final Duration signalTimeout;
     private final Duration stallTimeout;
 
+    /**
+     * Creates the monitor.
+     *
+     * @param assignments   where trips are stored
+     * @param resource      where units (and their last report and move times) are stored
+     * @param recovery      handles a failed trip and its case
+     * @param clock         source of the current time
+     * @param signalTimeout how long a unit may stay silent; must be positive
+     * @param stallTimeout  how long a unit may report without moving; must be positive
+     * @throws IllegalArgumentException if an argument is missing or a timeout is not positive
+     */
     public TripMonitor(AssignmentRepository assignments,  ResourceRepository resource,ResponseRecovery recovery, Clock clock, Duration signalTimeout, Duration stallTimeout) {
         if (assignments == null || resource == null || recovery == null || clock == null
                 || signalTimeout == null || stallTimeout == null) {
@@ -37,6 +62,12 @@ public class TripMonitor {
         this.signalTimeout = signalTimeout;
         this.stallTimeout = stallTimeout;
     }
+    /**
+     * Fails every EN_ROUTE trip whose unit has lost signal or stalled. Exactly on a deadline counts as passed.
+     *
+     * @return how many trips were failed
+     * @throws IllegalStateException if an en-route trip's unit is missing
+     */
     public int  checkTrips(){
         Instant now = clock.instant();
         int handled = 0;
@@ -59,6 +90,7 @@ public class TripMonitor {
         return handled;
 
     }
+    // the later of a reported time and the trip start, so data from before the trip is ignored
     private Instant laterOf(Optional<Instant> reported, Instant tripStart) {
         if (reported.isPresent() && reported.get().isAfter(tripStart)) {
             return reported.get();
