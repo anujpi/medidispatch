@@ -31,7 +31,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (354 tests)
+## Built so far (403 tests)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType,
 Location (haversine), Patient, Assignment (entity) / AssignmentStatus
 (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -39,7 +39,10 @@ Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, Pati
 AssignmentRepository (incl. findActive()), EventPublisher.
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned, AssignmentStatusChanged.
 Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
-TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery. Scoring: RiskScorer, SimpleScorer (placeholder).
+TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (incl. onPreempted), Preemptor, DispatchCoordinator,
+helpers ResponseTypes (band -> allowed unit types) and SearchRings (2, 4, 8, 16 km... capped at the max radius).
+Scoring: RiskScorer, SimpleScorer (placeholder).
+Ports added: CaseQueue.peekNext(), ResourceRepository.findAssignedNear(center, radiusKm, types).
 Resource also tracks lastSeenAt / lastMovedAt via reportLocation(where, at); movement means more than 20 m from the
 last counted position (movedFrom anchor), so GPS jitter is ignored and small steps add up.
 Test helper: MutableClock (a Clock that only moves with advance(Duration)). It currently lives in src/main/.../engine
@@ -60,6 +63,8 @@ Constructor shapes:
 - TimeoutMonitor(assignments, recovery, clock, ackTimeout)
 - UnitTracker(resources, clock)
 - TripMonitor(assignments, resources, recovery, clock, signalTimeout, stallTimeout)
+- Preemptor(assignments, cases, resources, claimer, patients, recovery, searchRadiusKm)
+- DispatchCoordinator(dispatcher, preemptor, queue)
 
 ## Last step: onFailed + ResponseRecovery (DONE, tested)
 FAILED status, AssignmentManager.onFailed, ResponseRecovery (onFailed, onTimedOut), TimeoutMonitor uses it.
@@ -78,8 +83,21 @@ last report/move and assignedAt, so old data from before the trip is ignored. AS
 ARRIVED trips may stand still. Failure reason (signal vs stall) is not recorded yet (a small enum could be added for
 the simulator). Overdue-arrival checks would need an EtaCalculator (not built).
 
+## Preemption + ring search (DONE, tests written)
+DispatchCoordinator.dispatchNext(): Dispatcher first (free unit); if none, peekNext() the stuck case, Preemptor.makeRoomFor
+frees a unit, then Dispatcher again. Callers still call caseManager.onAssigned(assignment) afterwards.
+Preemptor: searches rings around the waiting patient with resources.findAssignedNear (nearest ring wins); victim = trip
+ASSIGNED or EN_ROUTE (never ARRIVED), case band STRICTLY lower than the waiting case, unit type allowed for the waiting
+band. Inside a ring: lowest band first, then nearest, then trip id. Taken trip is CANCELLED, unit goes back to
+AVAILABLE (healthy, not OFFLINE), old case requeued keeping its openedAt. A lower band can hold an ALS unit when the
+case improves while responding (CaseManager updates the band only), which is how the tests build that case.
+Dispatcher also searches in SearchRings (2, 4, 8, 16 km... up to searchRadiusKm) instead of one big query. The in-memory
+repository still scans every unit; the ring logic pays off with real spatial indexes (Redis GEO / PostGIS).
+Known limits: between the cancel and the second dispatchNext another thread could take the freed unit (single dispatch
+loop for now; real fix = hand the unit over directly inside one transaction). Low-urgency cases can starve.
+No failure/cancel reason is recorded (preempted vs cancelled by a person).
+
 ## Next steps after that
-1. Preemption (a worse case takes a unit already assigned to a lower-risk case; reuse cancel + requeue).
-2. ResponseDecider (replaces the band->type table in Dispatcher), VitalsProcessor (single entry point).
-3. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
+1. ResponseDecider (replaces ResponseTypes' band->type table), VitalsProcessor (single entry point).
+2. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
    (trend, baseline, context, NEWS2). Then the Spring layer.
