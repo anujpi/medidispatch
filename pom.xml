@@ -10,6 +10,7 @@
     <packaging>pom</packaging>
     <modules>
         <module>dispatch-core</module>
+        <module>dispatch-sim</module>
     </modules>
 
     <properties>

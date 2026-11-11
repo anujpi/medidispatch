@@ -199,7 +199,11 @@ First responders work in memory: for a critical case, the engine sends the ambul
 
 Incoming readings have a single front door: `VitalsProcessor.process(reading)`. It is safe against messy device data: a redelivered reading is recognised as a duplicate and changes nothing, a late reading never overwrites newer data, and readings for unknown patients or with impossible times are ignored. Accepted readings are stored as history (for trend scoring later), scored, and applied to the patient's case; the dispatch loop then sends units.
 
-**In progress:** the patient and unit simulator, to run the whole engine end to end with injected breakdowns and signal loss.
+A console simulator (`dispatch-sim`) runs the whole engine end to end on a fake city: 50 patients with wearables (some deteriorate over ten minutes), 18 units that drive to them, and units that misbehave on purpose (never answer, break down halfway, lose signal halfway). It talks to the engine only through its public entry points and learns what happened only from the engine's events, the way a crew's app would. Two simulated hours run in about 0.2 seconds and end with a report of wait and response times per band, timeouts, failures, preemptions, reassignments and first responders. Runs are repeatable: the same seed builds the same city.
+
+The simulator has already found a real gap that 486 unit tests could not: a patient who deteriorates gradually first crosses into MEDIUM and gets a nurse, but the response is not upgraded when they turn CRITICAL a minute later (see [BACKLOG.md](BACKLOG.md)).
+
+**In progress:** fixing what the simulator found, then a JavaFX window that shows the simulated city moving live.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -222,7 +226,10 @@ Incoming readings have a single front door: `VitalsProcessor.process(reading)`. 
 - [x] Response decider (escalation ladder)
 - [x] First responders: a nurse or doctor sent alongside the ambulance for critical cases
 - [x] Single entry point for readings (`VitalsProcessor`)
-- [ ] Patient and unit simulator, with scorer comparison results
+- [x] Patient and unit simulator (console, with injected failures and a report)
+- [ ] Upgrade the response when a case gets worse, and the other gaps in [BACKLOG.md](BACKLOG.md)
+- [ ] Simulator window (JavaFX): the city, patients and units moving live
+- [ ] Scorer comparison in the simulator (once a second scorer exists)
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
 **Application layer**
@@ -247,7 +254,23 @@ cd medidispatch
 mvn test
 ```
 
-The engine is a library, so there is no server to start yet. The easiest way to see it work is to read a test: `FullLifecycleTest` wires the whole engine to in-memory adapters and plays out two emergencies that share one ambulance, ending with the ordered list of events the engine announced. `DispatcherTest` covers the dispatch rules in detail.
+The engine is a library, so there is no server to start yet. The quickest way to see it work is the simulator: run `SimulatorMain` in `dispatch-sim` (in IntelliJ, press the run button next to `main`; pass a number as the program argument to use another seed). It prints a report like this:
+
+```
+MediDispatch simulation, 120 min simulated
+Readings: 6000 (0 ignored)
+
+Band       Cases  Served   Avg wait   Max wait  Avg response  Max response
+CRITICAL       7       7    0.0 min    0.0 min       8.0 min      14.2 min
+HIGH           4       4    0.0 min    0.0 min       5.3 min       8.2 min
+MEDIUM         2       2    0.0 min    0.0 min      11.7 min      19.8 min
+
+Timeouts 0, failures 0, preemptions 0, cases reassigned 0
+First responders sent 1, arrived before the ambulance 1, average lead 1.3 min
+Cases still open at the end: 0
+```
+
+To see the engine in code, read a test: `FullLifecycleTest` wires the whole engine to in-memory adapters and plays out two emergencies that share one ambulance, ending with the ordered list of events the engine announced. `DispatcherTest` covers the dispatch rules in detail.
 
 A minimal example of the engine wired by hand:
 
@@ -258,9 +281,10 @@ ResourceRepository resources = new InMemoryResourceRepository();
 ResourceClaimer claimer = new InMemoryResourceClaimer();
 AssignmentRepository assignments = new InMemoryAssignmentRepository();
 EventPublisher publisher = new InMemoryEventPublisher();
+ResponseDecider decider = new LadderResponseDecider();
 
 Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer,
-        assignments, publisher, Clock.systemUTC(), 20.0);   // search radius in km
+        assignments, decider, publisher, Clock.systemUTC(), 20.0);   // search radius in km
 
 Optional<Assignment> assignment = dispatcher.dispatchNext();
 ```
@@ -281,9 +305,15 @@ medidispatch/
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator
     src/test/java/...         unit, concurrency and scenario tests
+  dispatch-sim/               console simulator: a fake city running on the real engine
+    src/main/java/com/medidispatch/sim/
+                              Simulation (wires the engine and runs the loop), SimulatedPatient, SimulatedUnit,
+                              SimulationConfig, MetricsCollector, SimulationReport, SimulatorMain
+  BACKLOG.md                  known gaps to tackle later
   (planned)
+  dispatch-sim-fx/            JavaFX window for the simulator
   dispatch-service/  ingestion-service/  fleet-service/  hospital-service/
-  tracking-service/  notification-service/  simulator/  dashboard/  deploy/  docs/
+  tracking-service/  notification-service/  dashboard/  deploy/  docs/
 ```
 
 ## Testing
@@ -297,6 +327,8 @@ Every component is covered by tests, including:
 - a full-lifecycle test that runs a reading all the way to a closed case and a reused ambulance, and asserts the exact ordered list of events,
 - "nothing happens" tests: repeating an assessment, or attempting an illegal move, changes no state and publishes no events,
 - time-based tests driven by a controllable clock, so "the unit stayed silent for 60 seconds" runs instantly, including the recovery scenario where the nearest ambulance goes silent and the next one is sent.
+
+- end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own.
 
 Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
 
