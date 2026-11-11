@@ -28,12 +28,29 @@ final class CityMap {
      * @return a point at most {@link #SIZE_KM}/2 from the centre in each direction
      */
     static Location randomPoint(Random random) {
-        double halfLat = SIZE_KM / 2 / KM_PER_DEGREE_LATITUDE;
-        // a degree of longitude gets shorter away from the equator
-        double halfLon = SIZE_KM / 2 / (KM_PER_DEGREE_LATITUDE * Math.cos(Math.toRadians(CENTER.latitude())));
-        double lat = CENTER.latitude() + (random.nextDouble() * 2 - 1) * halfLat;
-        double lon = CENTER.longitude() + (random.nextDouble() * 2 - 1) * halfLon;
+        double lat = CENTER.latitude() + (random.nextDouble() * 2 - 1) * halfLatitude();
+        double lon = CENTER.longitude() + (random.nextDouble() * 2 - 1) * halfLongitude();
         return new Location(lat, lon);
+    }
+
+    /**
+     * The edges of the city, for drawing it.
+     *
+     * @return the smallest and largest latitude and longitude inside the city
+     */
+    static WorldSnapshot.CityBounds bounds() {
+        return new WorldSnapshot.CityBounds(CENTER.latitude() - halfLatitude(), CENTER.longitude() - halfLongitude(),
+                                            CENTER.latitude() + halfLatitude(), CENTER.longitude() + halfLongitude());
+    }
+
+    // half the city's height, in degrees of latitude
+    private static double halfLatitude() {
+        return SIZE_KM / 2 / KM_PER_DEGREE_LATITUDE;
+    }
+
+    // half the city's width, in degrees of longitude (a degree of longitude gets shorter away from the equator)
+    private static double halfLongitude() {
+        return SIZE_KM / 2 / (KM_PER_DEGREE_LATITUDE * Math.cos(Math.toRadians(CENTER.latitude())));
     }
 
     /**

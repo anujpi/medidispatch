@@ -43,4 +43,18 @@ public class CityMapTest {
 
         assertEquals(to, CityMap.towards(from, to, 5.0));
     }
+
+    @Test
+    void theBoundsContainEveryRandomPointAndCentreOnTheCity() {
+        WorldSnapshot.CityBounds b = CityMap.bounds();
+        Random random = new Random(3);
+
+        for (int i = 0; i < 1000; i++) {
+            Location p = CityMap.randomPoint(random);
+            assertTrue(p.latitude() >= b.minLatitude() && p.latitude() <= b.maxLatitude());
+            assertTrue(p.longitude() >= b.minLongitude() && p.longitude() <= b.maxLongitude());
+        }
+        assertEquals(CityMap.CENTER.latitude(), (b.minLatitude() + b.maxLatitude()) / 2, 1e-9);
+        assertEquals(CityMap.CENTER.longitude(), (b.minLongitude() + b.maxLongitude()) / 2, 1e-9);
+    }
 }

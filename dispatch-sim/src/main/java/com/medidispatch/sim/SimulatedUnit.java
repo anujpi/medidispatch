@@ -151,4 +151,7 @@ final class SimulatedUnit {
     Location position()         { return position; }
     boolean broken()            { return broken; }
     boolean silent()            { return silent; }
+    boolean acknowledged()      { return acknowledged; }
+    boolean arrived()           { return arrived; }
+    Location target()           { return target; }       // null when free
 }

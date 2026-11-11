@@ -6,7 +6,9 @@ import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.Resource;
+import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
+import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.engine.AssignmentManager;
 import com.medidispatch.core.engine.CaseManager;
 import com.medidispatch.core.engine.DispatchCoordinator;
@@ -60,6 +62,7 @@ import java.util.Random;
  *   <li>{@link TimeoutMonitor} and {@link TripMonitor} catch the misbehaving units.</li>
  * </ul>
  * Call {@link #step()} to move one tick forward, or {@link #run()} to play the whole run and get the report.
+ * {@link #snapshot()} gives a read-only picture of the city at any moment, for a window to draw.
  */
 public final class Simulation {
 
@@ -81,7 +84,9 @@ public final class Simulation {
     private final MutableClock clock = new MutableClock(START);
 
     // the engine
+    private final InMemoryCaseQueue queue = new InMemoryCaseQueue();
     private final InMemoryCaseRepository cases = new InMemoryCaseRepository();
+    private final InMemoryResourceRepository resources = new InMemoryResourceRepository();
     private final InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
     private final InMemoryEventPublisher events = new InMemoryEventPublisher();
     private final CaseManager caseManager;
@@ -98,8 +103,10 @@ public final class Simulation {
     private final Map<String, Random> unitDice = new LinkedHashMap<>();
     private final Map<String, Instant> onSceneSince = new LinkedHashMap<>();
     private final MetricsCollector metrics = new MetricsCollector();
+    private final EventLog log = new EventLog(cases);
     private Instant nextReadingAt = START.plus(READING_INTERVAL);
     private int eventsSeen;
+    private int eventsLogged;
 
     /**
      * Builds the engine and the city.
@@ -115,9 +122,7 @@ public final class Simulation {
         this.end = START.plus(config.duration());
 
         // 1. the engine, wired by hand (Spring will do this part later)
-        InMemoryCaseQueue queue = new InMemoryCaseQueue();
         InMemoryPatientRepository patientRepo = new InMemoryPatientRepository();
-        InMemoryResourceRepository resources = new InMemoryResourceRepository();
         InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
         ResponseDecider decider = new LadderResponseDecider();
 
@@ -146,10 +151,10 @@ public final class Simulation {
             patients.put(p.id(), p);
             patientRepo.save(new Patient(p.id(), p.home()));
         }
-        addUnits("als", ResourceType.AMBULANCE_ALS, config.alsCount(), random, resources);
-        addUnits("bls", ResourceType.AMBULANCE_BLS, config.blsCount(), random, resources);
-        addUnits("nurse", ResourceType.NURSE, config.nurseCount(), random, resources);
-        addUnits("doctor", ResourceType.DOCTOR, config.doctorCount(), random, resources);
+        addUnits("als", ResourceType.AMBULANCE_ALS, config.alsCount(), random);
+        addUnits("bls", ResourceType.AMBULANCE_BLS, config.blsCount(), random);
+        addUnits("nurse", ResourceType.NURSE, config.nurseCount(), random);
+        addUnits("doctor", ResourceType.DOCTOR, config.doctorCount(), random);
     }
 
     /**
@@ -171,6 +176,7 @@ public final class Simulation {
         finishOnScene(now);         // 5. crews that have been on scene long enough finish
         timeoutMonitor.checkTimeouts();   // 6. the engine checks for silent and stuck units
         tripMonitor.checkTrips();
+        logNewEvents();                   // 7. readable lines for the window
     }
 
     /**
@@ -192,6 +198,36 @@ public final class Simulation {
      */
     public SimulationReport report() {
         return metrics.report(events.published(), Duration.between(START, clock.instant()));
+    }
+
+    /**
+     * A read-only picture of the city right now, for drawing it. It is a copy: changing the simulation later
+     * does not change a snapshot already taken.
+     *
+     * @return every patient and unit, the queue length, the latest events and the statistics so far
+     */
+    public WorldSnapshot snapshot() {
+        List<WorldSnapshot.PatientView> patientViews = new ArrayList<>();
+        for (SimulatedPatient p : patients.values()) {
+            Optional<RiskBand> band = Optional.empty();
+            Optional<Case> open = cases.findOpenByPatientId(p.id());
+            if (open.isPresent()) {
+                band = Optional.of(open.get().band());
+            }
+            patientViews.add(new WorldSnapshot.PatientView(p.id(), p.home(), band));
+        }
+        List<WorldSnapshot.UnitView> unitViews = new ArrayList<>();
+        for (SimulatedUnit u : units.values()) {
+            Optional<Location> target = Optional.empty();
+            Optional<AssignmentRole> role = Optional.empty();
+            if (u.busy()) {
+                target = Optional.of(u.target());
+                role = Optional.of(assignments.findById(u.assignmentId()).orElseThrow().role());
+            }
+            unitViews.add(new WorldSnapshot.UnitView(u.id(), u.type(), u.position(), stateOf(u), target, role));
+        }
+        return new WorldSnapshot(now(), CityMap.bounds(), patientViews, unitViews, queue.size(), log.lines(),
+                report(), finished());
     }
 
     /**
@@ -291,7 +327,36 @@ public final class Simulation {
         }
     }
 
+    // the event log has its own bookmark, so it also sees events from the end of a step
+    private void logNewEvents() {
+        List<DomainEvent> all = events.published();
+        for (int i = eventsLogged; i < all.size(); i++) {
+            log.record(all.get(i));
+        }
+        eventsLogged = all.size();
+    }
+
     // ---------- helpers ----------
+
+    // what a unit is doing, for the snapshot; the engine's OFFLINE wins, because a failed unit stays out of service
+    private WorldSnapshot.UnitState stateOf(SimulatedUnit u) {
+        if (resources.findById(u.id()).orElseThrow().status() == ResourceStatus.OFFLINE) {
+            return WorldSnapshot.UnitState.OFFLINE;
+        }
+        if (!u.busy()) {
+            return WorldSnapshot.UnitState.FREE;
+        }
+        if (u.broken()) {
+            return WorldSnapshot.UnitState.BROKEN_DOWN;
+        }
+        if (u.silent()) {
+            return WorldSnapshot.UnitState.NO_SIGNAL;
+        }
+        if (!u.acknowledged()) {
+            return WorldSnapshot.UnitState.ANSWERING;
+        }
+        return u.arrived() ? WorldSnapshot.UnitState.ON_SCENE : WorldSnapshot.UnitState.DRIVING;
+    }
 
     private void startTrip(UnitAssigned assigned) {
         SimulatedUnit unit = units.get(assigned.resourceId());
@@ -342,8 +407,7 @@ public final class Simulation {
         return new SimulatedPatient(id, home, fallsIll ? when : null, peak);
     }
 
-    private void addUnits(String prefix, ResourceType type, int count, Random random,
-                          InMemoryResourceRepository resources) {
+    private void addUnits(String prefix, ResourceType type, int count, Random random) {
         for (int i = 1; i <= count; i++) {
             String id = prefix + "-" + i;
             SimulatedUnit unit = new SimulatedUnit(id, type, CityMap.randomPoint(random));
