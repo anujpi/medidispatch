@@ -2,8 +2,10 @@ package com.medidispatch.core.engine;
 
 import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.RiskAssessment;
+import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.core.engine.ProcessingResult.Outcome;
+import com.medidispatch.core.port.CaseRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.VitalsRepository;
 import com.medidispatch.core.scoring.RiskScorer;
@@ -23,7 +25,9 @@ import java.util.Optional;
  *       {@code maxAge};</li>
  *   <li>reject it if it repeats or is older than the patient's newest stored reading;</li>
  *   <li>otherwise store it, score it with the {@link RiskScorer} and apply the assessment through
- *       {@link CaseManager#handle(RiskAssessment)}.</li>
+ *       {@link CaseManager#handle(RiskAssessment)};</li>
+ *   <li>if the patient got worse while a unit is on the way, let the {@link ResponseUpgrader} check that the
+ *       right kind of unit is coming.</li>
  * </ol>
  * A rejected reading changes nothing: it is not stored, not scored and not applied. Rejections are returned
  * as a {@link ProcessingResult}, not thrown, because they are normal with device data.
@@ -37,9 +41,11 @@ public class VitalsProcessor {
     public static final Duration FUTURE_TOLERANCE = Duration.ofMinutes(1);
 
     private final PatientRepository patients;
+    private final CaseRepository cases;
     private final VitalsRepository vitals;
     private final RiskScorer scorer;
     private final CaseManager caseManager;
+    private final ResponseUpgrader upgrader;
     private final Clock clock;
     private final Duration maxAge;
 
@@ -47,30 +53,37 @@ public class VitalsProcessor {
      * Creates the processor.
      *
      * @param patients    where registered patients are stored
+     * @param cases       where cases are stored (to see how bad the patient was before this reading)
      * @param vitals      where readings are stored
      * @param scorer      turns a reading into a risk assessment
      * @param caseManager applies the assessment to the patient's case
+     * @param upgrader    sends a better unit if the patient got worse while help is on the way
      * @param clock       source of the current time
      * @param maxAge      how old a reading may be and still be used; must be positive
      * @throws IllegalArgumentException if an argument is missing or {@code maxAge} is not positive
      */
     public VitalsProcessor(PatientRepository patients,
+                           CaseRepository cases,
                            VitalsRepository vitals,
                            RiskScorer scorer,
                            CaseManager caseManager,
+                           ResponseUpgrader upgrader,
                            Clock clock,
                            Duration maxAge) {
-        if (patients == null || vitals == null || scorer == null || caseManager == null
-                || clock == null || maxAge == null) {
-            throw new IllegalArgumentException("patients, vitals, scorer, caseManager, clock and maxAge are required");
+        if (patients == null || cases == null || vitals == null || scorer == null || caseManager == null
+                || upgrader == null || clock == null || maxAge == null) {
+            throw new IllegalArgumentException(
+                    "patients, cases, vitals, scorer, caseManager, upgrader, clock and maxAge are required");
         }
         if (maxAge.isZero() || maxAge.isNegative()) {
             throw new IllegalArgumentException("maxAge must be positive, got " + maxAge);
         }
         this.patients = patients;
+        this.cases = cases;
         this.vitals = vitals;
         this.scorer = scorer;
         this.caseManager = caseManager;
+        this.upgrader = upgrader;
         this.clock = clock;
         this.maxAge = maxAge;
     }
@@ -119,7 +132,22 @@ public class VitalsProcessor {
         // 4. a fresh reading: store it, score it, apply it to the case
         vitals.save(reading);
         RiskAssessment assessment = scorer.assess(reading);
+        Optional<RiskBand> bandBefore = bandOfOpenCase(reading.patientId());
         Optional<Case> currentCase = caseManager.handle(assessment);
+
+        // 5. if the patient got worse while help is on the way, make sure the right unit is coming
+        if (currentCase.isPresent() && bandBefore.isPresent()) {
+            upgrader.upgradeIfWorse(currentCase.get(), bandBefore.get());
+        }
         return ProcessingResult.accepted(assessment, currentCase);
+    }
+
+    // the band is copied out now, because handle() changes the same Case object in place
+    private Optional<RiskBand> bandOfOpenCase(String patientId) {
+        Optional<Case> open = cases.findOpenByPatientId(patientId);
+        if (open.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(open.get().band());
     }
 }

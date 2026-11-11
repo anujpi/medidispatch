@@ -6,6 +6,7 @@ import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.engine.ProcessingResult;
+import com.medidispatch.core.event.AssignmentRoleChanged;
 import com.medidispatch.core.event.AssignmentStatusChanged;
 import com.medidispatch.core.event.CaseStatusChanged;
 import com.medidispatch.core.event.DomainEvent;
@@ -69,6 +70,7 @@ final class MetricsCollector {
         Map<String, Instant> ambulanceArrivedAt = new HashMap<>();
         Map<String, Instant> responderArrivedAt = new HashMap<>();
         Map<String, Integer> ambulanceTrips = new HashMap<>();
+        Map<String, Integer> upgrades = new HashMap<>();
         int timeouts = 0;
         int failures = 0;
         int preemptions = 0;
@@ -105,6 +107,10 @@ final class MetricsCollector {
                 } else if (changed.to() == AssignmentStatus.CANCELLED && role == AssignmentRole.PRIMARY) {
                     preemptions++;                            // only preemption cancels an ambulance here
                 }
+            } else if (e instanceof AssignmentRoleChanged changed) {
+                roleOfTrip.put(changed.assignmentId(), changed.to());   // the unit is a first responder now
+                upgrades.put(changed.caseId(), upgrades.getOrDefault(changed.caseId(), 0) + 1);
+                respondersSent++;                             // kept on the case as a first responder
             }
         }
 
@@ -140,15 +146,19 @@ final class MetricsCollector {
             }
         }
 
+        // a case was reassigned if it lost a unit; an upgrade to a better unit does not count as losing one
         int reassigned = 0;
-        for (int trips : ambulanceTrips.values()) {
-            if (trips > 1) {
+        int upgraded = 0;
+        for (Map.Entry<String, Integer> trips : ambulanceTrips.entrySet()) {
+            int caseUpgrades = upgrades.getOrDefault(trips.getKey(), 0);
+            upgraded += caseUpgrades;
+            if (trips.getValue() - 1 - caseUpgrades > 0) {
                 reassigned++;
             }
         }
 
         return new SimulationReport(simulated, readings, ignoredReadings, byBand, timeouts, failures, preemptions,
-                reassigned, respondersSent, leads.size(), average(leads), alertedAt.size() - closed.size());
+                reassigned, upgraded, respondersSent, leads.size(), average(leads), alertedAt.size() - closed.size());
     }
 
     private static void add(Map<RiskBand, List<Double>> map, RiskBand band, double value) {

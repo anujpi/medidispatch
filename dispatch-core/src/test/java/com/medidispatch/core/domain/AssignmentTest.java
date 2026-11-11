@@ -145,4 +145,35 @@ public class AssignmentTest {
     void aMissingRoleIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new Assignment("case-1", "r1", null, ASSIGNED_AT));
     }
+
+    // ---------- demotion to first responder ----------
+
+    @Test
+    void aMainResponseCanBecomeAFirstResponderAndKeepsGoing() {
+        Assignment a = newAssignment();
+        a.transitionTo(AssignmentStatus.EN_ROUTE);
+
+        a.demoteToSupport();
+
+        assertEquals(AssignmentRole.SUPPORT, a.role());
+        assertEquals(AssignmentStatus.EN_ROUTE, a.status());
+    }
+
+    @Test
+    void aFirstResponderCannotBeDemotedAgain() {
+        Assignment a = newAssignment();
+        a.demoteToSupport();
+
+        assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
+        assertEquals(AssignmentRole.SUPPORT, a.role());
+    }
+
+    @Test
+    void anEndedTripCannotBeDemotedAndNothingChanges() {
+        Assignment a = newAssignment();
+        a.transitionTo(AssignmentStatus.CANCELLED);
+
+        assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
+        assertEquals(AssignmentRole.PRIMARY, a.role());
+    }
 }

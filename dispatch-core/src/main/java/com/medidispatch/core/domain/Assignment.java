@@ -8,14 +8,15 @@ import java.util.UUID;
  * <p>
  * Gets a random UUID as its id and starts in {@link AssignmentStatus#ASSIGNED}. Status changes go through
  * {@link #transitionTo(AssignmentStatus)}, which refuses illegal moves. A case can have one
- * {@link AssignmentRole#PRIMARY} trip and, alongside it, a {@link AssignmentRole#SUPPORT} trip.
+ * {@link AssignmentRole#PRIMARY} trip and, alongside it, a {@link AssignmentRole#SUPPORT} trip. A PRIMARY trip can
+ * become SUPPORT once, when a more capable unit is needed ({@link #demoteToSupport()}).
  */
 public class Assignment {
 
     private final String id;
     private final String caseId;
     private final String resourceId;
-    private final AssignmentRole role;
+    private AssignmentRole role;
     private final Instant assignedAt;
     private AssignmentStatus status = AssignmentStatus.ASSIGNED;
 
@@ -64,6 +65,23 @@ public class Assignment {
             throw new IllegalStateException("Cannot go from " + status + " to " + next);
         }
         status = next;
+    }
+
+    /**
+     * Turns the main response into a first responder, because a more capable unit is needed.
+     * <p>
+     * The trip keeps going; only its role changes, once, from PRIMARY to SUPPORT.
+     *
+     * @throws IllegalStateException if the trip is already SUPPORT or has ended; nothing is changed
+     */
+    public void demoteToSupport() {
+        if (role != AssignmentRole.PRIMARY) {
+            throw new IllegalStateException("Trip " + id + " is already " + role);
+        }
+        if (status.isTerminal()) {
+            throw new IllegalStateException("Trip " + id + " has already ended (" + status + ")");
+        }
+        role = AssignmentRole.SUPPORT;
     }
 
     public String id()                { return id; }

@@ -5,6 +5,7 @@ import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
+import com.medidispatch.core.event.AssignmentRoleChanged;
 import com.medidispatch.core.event.AssignmentStatusChanged;
 import com.medidispatch.core.port.AssignmentRepository;
 import com.medidispatch.core.port.EventPublisher;
@@ -136,6 +137,29 @@ public class AssignmentManager {
      */
     public Assignment onFailed(String assignmentId){
         return move(assignmentId, AssignmentStatus.FAILED);
+    }
+
+    /**
+     * The unit is no longer enough for the case: its trip becomes a first responder's (PRIMARY to SUPPORT) and
+     * keeps going. Normally called through {@link ResponseUpgrader}, which also requeues the case for a better unit.
+     *
+     * @param assignmentId the trip whose role changes
+     * @return the updated trip
+     * @throws IllegalArgumentException if {@code assignmentId} is blank
+     * @throws IllegalStateException    if there is no such trip, it is not PRIMARY, or it has ended
+     */
+    public Assignment demoteToSupport(String assignmentId) {
+        if (assignmentId == null || assignmentId.isBlank()) {
+            throw new IllegalArgumentException("assignmentId is required");
+        }
+        Assignment a = assignments.findById(assignmentId)
+                .orElseThrow(() -> new IllegalStateException("No assignment " + assignmentId));
+        AssignmentRole from = a.role();
+        a.demoteToSupport();                                 // refuses before anything changes
+        assignments.save(a);
+        publisher.publish(new AssignmentRoleChanged(
+                a.id(), a.caseId(), a.resourceId(), from, a.role(), clock.instant()));
+        return a;
     }
 
     private Assignment move(String assignmentId, AssignmentStatus next) {

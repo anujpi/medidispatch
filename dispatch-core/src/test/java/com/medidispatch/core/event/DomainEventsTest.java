@@ -128,4 +128,20 @@ public class DomainEventsTest {
         assertEquals(AssignmentRole.SUPPORT, new UnitAssigned("a1", "c1", "r1", AssignmentRole.SUPPORT, T).role());
         assertThrows(IllegalArgumentException.class, () -> new UnitAssigned("a1", "c1", "r1", null, T));
     }
+
+    @Test
+    void assignmentRoleChangedRejectsBadValues() {
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                null, "c1", "r1", AssignmentRole.PRIMARY, AssignmentRole.SUPPORT, T));
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                "a1", " ", "r1", AssignmentRole.PRIMARY, AssignmentRole.SUPPORT, T));
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                "a1", "c1", null, AssignmentRole.PRIMARY, AssignmentRole.SUPPORT, T));
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                "a1", "c1", "r1", null, AssignmentRole.SUPPORT, T));
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                "a1", "c1", "r1", AssignmentRole.PRIMARY, null, T));
+        assertThrows(IllegalArgumentException.class, () -> new AssignmentRoleChanged(
+                "a1", "c1", "r1", AssignmentRole.PRIMARY, AssignmentRole.SUPPORT, null));
+    }
 }

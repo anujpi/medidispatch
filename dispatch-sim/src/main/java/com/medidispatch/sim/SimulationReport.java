@@ -15,8 +15,11 @@ import java.util.Map;
  * @param timeouts                   trips that timed out because the unit never answered
  * @param failures                   trips that failed (broke down, lost signal)
  * @param preemptions                ambulance trips taken away for a worse case
- * @param reassignedCases            cases that needed more than one ambulance
- * @param firstRespondersSent        first responders sent alongside an ambulance
+ * @param reassignedCases            cases that lost a unit and needed another one
+ * @param upgradedResponses          times a unit was no longer enough (the patient got worse) and a better one was
+ *                                   sent, with the first unit kept on as a first responder
+ * @param firstRespondersSent        first responders on cases: sent alongside an ambulance, or kept on as one after
+ *                                   an upgrade
  * @param firstRespondersFirst       first responders who reached the patient before the ambulance
  * @param averageLeadMinutes         how much earlier those first responders arrived, on average
  * @param casesOpenAtEnd             cases not closed when the run ended
@@ -29,6 +32,7 @@ public record SimulationReport(Duration simulated,
                                int failures,
                                int preemptions,
                                int reassignedCases,
+                               int upgradedResponses,
                                int firstRespondersSent,
                                int firstRespondersFirst,
                                double averageLeadMinutes,
@@ -90,8 +94,8 @@ public record SimulationReport(Duration simulated,
                     band, s.cases(), s.served(), s.averageWaitMinutes(), s.maxWaitMinutes(),
                     s.averageResponseMinutes(), s.maxResponseMinutes()));
         }
-        text.append(String.format("%nTimeouts %d, failures %d, preemptions %d, cases reassigned %d%n",
-                timeouts, failures, preemptions, reassignedCases));
+        text.append(String.format("%nTimeouts %d, failures %d, preemptions %d, cases reassigned %d, responses upgraded %d%n",
+                timeouts, failures, preemptions, reassignedCases, upgradedResponses));
         text.append(String.format("First responders sent %d, arrived before the ambulance %d, average lead %.1f min%n",
                 firstRespondersSent, firstRespondersFirst, averageLeadMinutes));
         text.append(String.format("Cases still open at the end: %d%n", casesOpenAtEnd));

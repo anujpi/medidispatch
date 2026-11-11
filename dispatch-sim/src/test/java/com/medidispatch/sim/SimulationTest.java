@@ -49,12 +49,15 @@ public class SimulationTest {
     }
 
     @Test
-    void withNoNursesOrDoctorsNoFirstRespondersAreSent() {
+    void withNoNursesOrDoctorsTheOnlyFirstRespondersAreUpgradedAmbulances() {
         SimulationConfig d = NO_FAILURES;
         SimulationConfig noResponders = new SimulationConfig(d.seed(), d.duration(), d.tick(), d.patientCount(),
                 d.deteriorationChance(), d.alsCount(), d.blsCount(), 0, 0, 0, 0, 0);
 
-        assertEquals(0, new Simulation(noResponders).run().firstRespondersSent());
+        SimulationReport report = new Simulation(noResponders).run();
+
+        // nobody is sent alongside an ambulance; a BLS kept on after its patient turned critical still counts
+        assertEquals(report.upgradedResponses(), report.firstRespondersSent());
     }
 
     @Test
@@ -91,5 +94,12 @@ public class SimulationTest {
     @Test
     void aMissingConfigIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new Simulation(null));
+    }
+
+    @Test
+    void patientsWhoGetWorseWhileHelpIsComingGetABetterUnit() {     // the gap the simulator found
+        SimulationReport report = new Simulation(NO_FAILURES).run();
+
+        assertTrue(report.upgradedResponses() > 0, "a nurse case that turns critical should get an ambulance");
     }
 }

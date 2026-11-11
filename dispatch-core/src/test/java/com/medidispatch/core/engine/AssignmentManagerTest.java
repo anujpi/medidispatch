@@ -7,6 +7,7 @@ import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
+import com.medidispatch.core.event.AssignmentRoleChanged;
 import com.medidispatch.core.event.AssignmentStatusChanged;
 import com.medidispatch.core.memory.InMemoryAssignmentRepository;
 import com.medidispatch.core.memory.InMemoryEventPublisher;
@@ -529,5 +530,34 @@ public class AssignmentManagerTest {
                         new AssignmentStatusChanged(nurse.id(), "case-1", "nurse-1",
                                 AssignmentStatus.EN_ROUTE, AssignmentStatus.CANCELLED, NOW)),
                 events.published());
+    }
+
+    // ---------- demotion to first responder ----------
+
+    @Test
+    void demotingAMainResponseSavesItAnnouncesItAndKeepsTheUnitBusy() {
+        Assignment a = dispatched("case-1", "nurse-1");
+        manager.onEnRoute(a.id());
+        events.clear();
+
+        Assignment demoted = manager.demoteToSupport(a.id());
+
+        assertEquals(AssignmentRole.SUPPORT, demoted.role());
+        assertEquals(AssignmentRole.SUPPORT, assignments.findById(a.id()).get().role());
+        assertEquals(AssignmentStatus.EN_ROUTE, tripStatus(a));
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("nurse-1"));
+        assertEquals(List.of(new AssignmentRoleChanged(a.id(), "case-1", "nurse-1",
+                AssignmentRole.PRIMARY, AssignmentRole.SUPPORT, NOW)), events.published());
+    }
+
+    @Test
+    void demotingIsRefusedForUnknownTripsBadIdsAndFirstResponders() {
+        Assignment nurse = supportDispatched("case-1", "nurse-1");
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.demoteToSupport("no-such-trip"));
+        assertThrows(IllegalArgumentException.class, () -> manager.demoteToSupport(" "));
+        assertThrows(IllegalStateException.class, () -> manager.demoteToSupport(nurse.id()));
+        assertTrue(events.published().isEmpty());
     }
 }

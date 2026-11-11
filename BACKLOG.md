@@ -5,7 +5,7 @@ Ordered roughly by priority inside each group.
 
 ## Engine behaviour
 
-- [ ] **Upgrade the response when a case gets worse.** *Found by the simulator; most important.* A patient who
+- [x] **Upgrade the response when a case gets worse.** *Found by the simulator. Done: `ResponseUpgrader`.* A patient who
       deteriorates gradually first crosses into MEDIUM, so a nurse is sent; a minute later they are CRITICAL, but
       while a case is RESPONDING `CaseManager` only updates the band, so the nurse stays the only help and no
       ambulance is ever sent. When the band rises while RESPONDING, the engine should check the case's new

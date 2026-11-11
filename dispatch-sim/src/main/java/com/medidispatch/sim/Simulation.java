@@ -14,6 +14,7 @@ import com.medidispatch.core.engine.Dispatcher;
 import com.medidispatch.core.engine.MutableClock;
 import com.medidispatch.core.engine.Preemptor;
 import com.medidispatch.core.engine.ResponseRecovery;
+import com.medidispatch.core.engine.ResponseUpgrader;
 import com.medidispatch.core.engine.SupportDispatcher;
 import com.medidispatch.core.engine.TimeoutMonitor;
 import com.medidispatch.core.engine.TripMonitor;
@@ -133,8 +134,10 @@ public final class Simulation {
         unitTracker = new UnitTracker(resources, clock);
         timeoutMonitor = new TimeoutMonitor(assignments, recovery, clock, ACK_TIMEOUT);
         tripMonitor = new TripMonitor(assignments, resources, recovery, clock, SIGNAL_TIMEOUT, STALL_TIMEOUT);
-        processor = new VitalsProcessor(patientRepo, new InMemoryVitalsRepository(), new SimpleScorer(clock),
-                caseManager, clock, MAX_READING_AGE);
+        ResponseUpgrader upgrader = new ResponseUpgrader(assignments, resources, patientRepo, decider,
+                assignmentManager, caseManager);
+        processor = new VitalsProcessor(patientRepo, cases, new InMemoryVitalsRepository(), new SimpleScorer(clock),
+                caseManager, upgrader, clock, MAX_READING_AGE);
 
         // 2. the city: every random choice comes from the seed
         Random random = new Random(config.seed());
