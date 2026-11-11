@@ -112,7 +112,7 @@ flowchart TB
         MEM[In-memory adapters<br/>tests and simulator]
     end
     subgraph Core["dispatch-core (pure Java)"]
-        ENG[Engine<br/>Dispatcher, CaseManager,<br/>AssignmentManager, TimeoutMonitor,<br/>TripMonitor, UnitTracker,<br/>ResponseRecovery, Preemptor,<br/>SupportDispatcher, DispatchCoordinator]
+        ENG[Engine<br/>VitalsProcessor, Dispatcher, CaseManager,<br/>AssignmentManager, TimeoutMonitor,<br/>TripMonitor, UnitTracker,<br/>ResponseRecovery, Preemptor,<br/>SupportDispatcher, DispatchCoordinator]
         DOM[Domain<br/>Case, Resource, Assignment,<br/>Patient, scoring, events]
         PORTS[Ports<br/>CaseQueue, ResourceRepository,<br/>ResourceClaimer, PatientRepository,<br/>CaseRepository, AssignmentRepository,<br/>EventPublisher]
     end
@@ -178,9 +178,9 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | Resources | `Resource` (also remembers when a unit last reported and when it last really moved, ignoring 20 m of GPS jitter), `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
 | Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`, `TIMED_OUT`, `FAILED`), so the record says why a trip ended; `AssignmentRole` (`PRIMARY` ambulance or `SUPPORT` first responder) |
 | People | `Patient` |
-| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `EventPublisher` |
+| Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `VitalsRepository` (reading history), `EventPublisher` |
 | Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
-| Engine | `Dispatcher` (priority-ordered, nearest suitable unit found by searching in widening rings, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `UnitTracker` (records unit position reports), `TripMonitor` (fails an en-route trip when the unit goes silent or stops making progress), `ResponseRecovery` (one entry point for "this unit is lost or taken": the trip ends and, if it was the ambulance, the case goes back to the queue so the next-best unit is sent), `Preemptor` (finds a unit on its way to a less urgent case and frees it for a worse one, never one that has arrived), `SupportDispatcher` (sends a doctor or nurse alongside the ambulance when one is closer), `DispatchCoordinator` (free unit first, then preempt, then try again, then a first responder), `SearchRings` (the search radius steps, shared by dispatch and preemption) |
+| Engine | `VitalsProcessor` (the front door for readings: ignores unknown patients, readings from the future or too old, repeats and late arrivals, then stores, scores and applies the rest; returns a `ProcessingResult` saying what happened instead of throwing), `Dispatcher` (priority-ordered, nearest suitable unit found by searching in widening rings, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `UnitTracker` (records unit position reports), `TripMonitor` (fails an en-route trip when the unit goes silent or stops making progress), `ResponseRecovery` (one entry point for "this unit is lost or taken": the trip ends and, if it was the ambulance, the case goes back to the queue so the next-best unit is sent), `Preemptor` (finds a unit on its way to a less urgent case and frees it for a worse one, never one that has arrived), `SupportDispatcher` (sends a doctor or nurse alongside the ambulance when one is closer), `DispatchCoordinator` (free unit first, then preempt, then try again, then a first responder), `SearchRings` (the search radius steps, shared by dispatch and preemption) |
 | Response decision | `ResponseDecider` (strategy interface: case + patient in, plan out), `ResponsePlan` (main-response unit types in order of preference, plus first-responder types), `LadderResponseDecider` (the escalation ladder: send the least capable unit that is enough, so advanced ambulances stay free for the worst cases; a placeholder table, not clinical guidance) |
 
 The full lifecycle works in memory and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, travels, arrives, and is closed. The ambulance is then freed and serves the next waiting patient, and the engine announces every step as an ordered list of events.
@@ -197,7 +197,9 @@ The escalation ladder works in memory: each case gets a response plan, an ordere
 
 First responders work in memory: for a critical case, the engine sends the ambulance and, if a doctor or nurse is free and closer than the ambulance, that responder too, so care starts minutes earlier. The responder is best-effort (never queued, never preempting anyone), stands down when the ambulance arrives, and losing one never puts the case back in the queue; losing the ambulance does, while the responder keeps going. Every trip is handled by its own id, since a case can now have two units on it.
 
-**In progress:** a single entry point for incoming readings (`VitalsProcessor`), then the patient and unit simulator.
+Incoming readings have a single front door: `VitalsProcessor.process(reading)`. It is safe against messy device data: a redelivered reading is recognised as a duplicate and changes nothing, a late reading never overwrites newer data, and readings for unknown patients or with impossible times are ignored. Accepted readings are stored as history (for trend scoring later), scored, and applied to the patient's case; the dispatch loop then sends units.
+
+**In progress:** the patient and unit simulator, to run the whole engine end to end with injected breakdowns and signal loss.
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -219,7 +221,7 @@ First responders work in memory: for a critical case, the engine sends the ambul
 - [x] Preemption of lower-priority responses
 - [x] Response decider (escalation ladder)
 - [x] First responders: a nurse or doctor sent alongside the ambulance for critical cases
-- [ ] Single entry point for readings (`VitalsProcessor`)
+- [x] Single entry point for readings (`VitalsProcessor`)
 - [ ] Patient and unit simulator, with scorer comparison results
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
@@ -274,7 +276,7 @@ medidispatch/
       domain/                 Case, Resource, Assignment, Patient, Location, VitalsReading, RiskAssessment, ...
       scoring/                RiskScorer and its implementations
       response/               ResponseDecider, ResponsePlan and the escalation ladder
-      engine/                 Dispatcher, CaseManager, AssignmentManager, TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery, Preemptor, SupportDispatcher, DispatchCoordinator (more to come)
+      engine/                 VitalsProcessor, Dispatcher, CaseManager, AssignmentManager, TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery, Preemptor, SupportDispatcher, DispatchCoordinator (more to come)
       event/                  domain events the engine announces
       port/                   interfaces the core needs from the outside world
       memory/                 in-memory adapters for tests and the simulator

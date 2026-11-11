@@ -8,9 +8,10 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   1. Talk about what we build next and why.
   2. Spec: every class needed, its methods, and which package it goes in.
   3. LLD lesson (principle, what goes wrong otherwise, a check-yourself question), plus **Decisions for me**.
-  4. STOP. Give code only when I ask. Give tests only after that, when I ask.
-  5. When all tests pass, I commit, then we go to the next step.
-  Never dump code or tests unprompted.
+  4. STOP. When I ask for code, show it in chat with explanations so I can understand it first.
+  5. When I say so, Claude writes the files into the project, writes/updates the tests and runs the suite.
+  6. When all tests pass, I commit, then we go to the next step.
+  Never dump code or tests unprompted. Every main class gets Javadoc (class, constructors, public methods).
 - I type the code myself and run the tests, so explain every new Java feature (lambdas, switch, Optional, etc.)
   in plain words. I'm not comfortable with `::` method references or streams yet, so prefer explicit lambdas
   and plain loops.
@@ -31,15 +32,15 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (463 tests)
+## Built so far (486 tests)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
 AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
-EventPublisher.
+VitalsRepository (save, latestFor(patientId) = newest by timeStamp), EventPublisher.
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned (carries the role), AssignmentStatusChanged.
-Engine: Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
+Engine: VitalsProcessor + ProcessingResult, Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
 TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (incl. onPreempted), Preemptor, SupportDispatcher,
 DispatchCoordinator, helpers SearchRings (2, 4, 8, 16 km... capped at the max radius) and UnitAssigner
 (package-private: claim + ASSIGNED + save trip + publish UnitAssigned, shared by Dispatcher and SupportDispatcher).
@@ -74,6 +75,7 @@ Constructor shapes:
 - SupportDispatcher(cases, patients, resources, claimer, assignments, decider, publisher, clock)
 - DispatchCoordinator(dispatcher, preemptor, supportDispatcher, queue)
 - Assignment(caseId, resourceId, role, assignedAt); UnitAssigned(assignmentId, caseId, resourceId, role, occurredAt)
+- VitalsProcessor(patients, vitals, scorer, caseManager, clock, maxAge)
 - Tests build deciders with `new LadderResponseDecider()`.
 - AssignmentManager and ResponseRecovery methods take an ASSIGNMENT id (not a case id); AssignmentManager methods
   return the updated Assignment. Tests that only know the case use a per-file helper tripOf(caseId).
@@ -138,7 +140,19 @@ Known limits: "closer" is straight-line (no EtaCalculator); support is only cons
 (a responder freed a minute later is not sent); first-responder role not recorded in AssignmentStatusChanged.
 Open: COMMUNITY_RESPONDER (volunteers) and support for HIGH cases were deferred.
 
+## VitalsProcessor (DONE, tested)
+process(reading) checks in order, first failure wins and changes NOTHING (not stored, not scored, no event):
+UNKNOWN_PATIENT; FROM_THE_FUTURE (more than FUTURE_TOLERANCE = 1 min ahead of the clock); TOO_OLD (older than maxAge,
+10 min in tests); DUPLICATE (same timeStamp as the patient's latest stored reading); OUT_OF_ORDER (older than it).
+Both time boundaries count as usable. Accepted: vitals.save -> scorer.assess -> caseManager.handle ->
+ProcessingResult.accepted(assessment, case). Rejections are returned (ProcessingResult.Outcome), never thrown; only a
+null reading throws. It never dispatches (single dispatch loop = DispatchCoordinator). Out-of-order readings are
+dropped, not stored. No VitalsRejected event (the Spring layer logs/counts from the result).
+Engine entry points now: VitalsProcessor (readings in), DispatchCoordinator (dispatch loop), UnitTracker and
+AssignmentManager (unit reports, by assignment id), TimeoutMonitor and TripMonitor (scheduled checks).
+
 ## Next steps after that
-1. VitalsProcessor (single entry point for readings: validate -> score -> CaseManager.handle).
-2. Simulator with scorer comparison (inject breakdowns and signal loss), then real scoring
-   (trend, baseline, context, NEWS2). Then the Spring layer.
+1. Simulator (user is short on time; deadline December): fake patients + units driving the real entry points,
+   inject breakdowns and signal loss, compare scorers. Keep it small.
+2. Then the Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard).
+3. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
