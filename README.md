@@ -180,7 +180,7 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | People | `Patient` |
 | Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `VitalsRepository` (reading history), `EventPublisher` |
 | Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
-| Engine | `VitalsProcessor` (the front door for readings: ignores unknown patients, readings from the future or too old, repeats and late arrivals, then stores, scores and applies the rest; returns a `ProcessingResult` saying what happened instead of throwing), `Dispatcher` (priority-ordered, nearest suitable unit found by searching in widening rings, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `UnitTracker` (records unit position reports), `TripMonitor` (fails an en-route trip when the unit goes silent or stops making progress), `ResponseRecovery` (one entry point for "this unit is lost or taken": the trip ends and, if it was the ambulance, the case goes back to the queue so the next-best unit is sent), `Preemptor` (finds a unit on its way to a less urgent case and frees it for a worse one, never one that has arrived), `SupportDispatcher` (sends a doctor or nurse alongside the ambulance when one is closer), `DispatchCoordinator` (free unit first, then preempt, then try again, then a first responder), `SearchRings` (the search radius steps, shared by dispatch and preemption) |
+| Engine | `VitalsProcessor` (the front door for readings: ignores unknown patients, readings from the future or too old, repeats and late arrivals, then stores, scores and applies the rest; returns a `ProcessingResult` saying what happened instead of throwing), `Dispatcher` (priority-ordered, nearest suitable unit found by searching in widening rings, safe claiming with fallback), `CaseManager` (turns risk assessments into alerted, queued and re-ranked cases, and tracks the case to closure), `AssignmentManager` (trip progress, and returning the unit and its claim to the pool when a trip ends; a unit whose trip timed out or failed is taken offline instead), `TimeoutMonitor` (gives up on a unit that never acknowledges its assignment), `UnitTracker` (records unit position reports), `TripMonitor` (fails an en-route trip when the unit goes silent or stops making progress), `ResponseRecovery` (one entry point for "this unit is lost or taken": the trip ends and, if it was the ambulance, the case goes back to the queue so the next-best unit is sent), `ResponseUpgrader` (when a patient gets worse while help is on the way and the unit coming is no longer enough, keeps that unit on as a first responder and queues the case for a proper one), `Preemptor` (finds a unit on its way to a less urgent case and frees it for a worse one, never one that has arrived), `SupportDispatcher` (sends a doctor or nurse alongside the ambulance when one is closer), `DispatchCoordinator` (free unit first, then preempt, then try again, then a first responder), `SearchRings` (the search radius steps, shared by dispatch and preemption) |
 | Response decision | `ResponseDecider` (strategy interface: case + patient in, plan out), `ResponsePlan` (main-response unit types in order of preference, plus first-responder types), `LadderResponseDecider` (the escalation ladder: send the least capable unit that is enough, so advanced ambulances stay free for the worst cases; a placeholder table, not clinical guidance) |
 
 The full lifecycle works in memory and is covered by a test: a severely abnormal reading is scored, becomes an alerted case, is dispatched to the nearest suitable ambulance, travels, arrives, and is closed. The ambulance is then freed and serves the next waiting patient, and the engine announces every step as an ordered list of events.
@@ -201,9 +201,9 @@ Incoming readings have a single front door: `VitalsProcessor.process(reading)`. 
 
 A console simulator (`dispatch-sim`) runs the whole engine end to end on a fake city: 50 patients with wearables (some deteriorate over ten minutes), 18 units that drive to them, and units that misbehave on purpose (never answer, break down halfway, lose signal halfway). It talks to the engine only through its public entry points and learns what happened only from the engine's events, the way a crew's app would. Two simulated hours run in about 0.2 seconds and end with a report of wait and response times per band, timeouts, failures, preemptions, reassignments and first responders. Runs are repeatable: the same seed builds the same city.
 
-The simulator has already found a real gap that 486 unit tests could not: a patient who deteriorates gradually first crosses into MEDIUM and gets a nurse, but the response is not upgraded when they turn CRITICAL a minute later (see [BACKLOG.md](BACKLOG.md)).
+The simulator has already found, and helped fix, a real gap that 486 unit tests could not: a patient who deteriorates gradually first crosses into MEDIUM and gets a nurse, but nothing upgraded the response when they turned CRITICAL a minute later. Now the engine re-checks the response whenever a patient gets worse while help is on the way: if the unit coming is no longer enough, it stays on as a first responder and a proper ambulance is sent. In a typical run six responses are upgraded, and the nurse who was already on the way reaches the patient minutes before the ambulance.
 
-**In progress:** fixing what the simulator found, then a JavaFX window that shows the simulated city moving live.
+**In progress:** a JavaFX window that shows the simulated city moving live. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -227,7 +227,8 @@ The simulator has already found a real gap that 486 unit tests could not: a pati
 - [x] First responders: a nurse or doctor sent alongside the ambulance for critical cases
 - [x] Single entry point for readings (`VitalsProcessor`)
 - [x] Patient and unit simulator (console, with injected failures and a report)
-- [ ] Upgrade the response when a case gets worse, and the other gaps in [BACKLOG.md](BACKLOG.md)
+- [x] Upgrade the response when a case gets worse (found by the simulator)
+- [ ] The other known gaps in [BACKLOG.md](BACKLOG.md)
 - [ ] Simulator window (JavaFX): the city, patients and units moving live
 - [ ] Scorer comparison in the simulator (once a second scorer exists)
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
@@ -261,12 +262,12 @@ MediDispatch simulation, 120 min simulated
 Readings: 6000 (0 ignored)
 
 Band       Cases  Served   Avg wait   Max wait  Avg response  Max response
-CRITICAL       7       7    0.0 min    0.0 min       8.0 min      14.2 min
-HIGH           4       4    0.0 min    0.0 min       5.3 min       8.2 min
+CRITICAL       7       7    0.0 min    0.0 min      11.2 min      18.7 min
+HIGH           4       4    0.0 min    0.0 min       5.0 min       6.8 min
 MEDIUM         2       2    0.0 min    0.0 min      11.7 min      19.8 min
 
-Timeouts 0, failures 0, preemptions 0, cases reassigned 0
-First responders sent 1, arrived before the ambulance 1, average lead 1.3 min
+Timeouts 0, failures 1, preemptions 0, cases reassigned 1, responses upgraded 6
+First responders sent 7, arrived before the ambulance 4, average lead 9.1 min
 Cases still open at the end: 0
 ```
 

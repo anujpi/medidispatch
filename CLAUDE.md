@@ -32,15 +32,17 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (521 tests: 486 in dispatch-core, 35 in dispatch-sim)
+## Built so far (538 tests: 503 in dispatch-core, 35 in dispatch-sim)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
 AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
 VitalsRepository (save, latestFor(patientId) = newest by timeStamp), EventPublisher.
-Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned (carries the role), AssignmentStatusChanged.
-Engine: VitalsProcessor + ProcessingResult, Dispatcher, CaseManager (incl. onAssignmentLost), AssignmentManager (incl. timeOut, onFailed),
+Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned (carries the role), AssignmentStatusChanged,
+AssignmentRoleChanged (PRIMARY -> SUPPORT on an upgrade).
+Engine: VitalsProcessor + ProcessingResult, ResponseUpgrader, Dispatcher, CaseManager (incl. onAssignmentLost),
+AssignmentManager (incl. timeOut, onFailed, demoteToSupport),
 TimeoutMonitor, UnitTracker, TripMonitor, ResponseRecovery (incl. onPreempted), Preemptor, SupportDispatcher,
 DispatchCoordinator, helpers SearchRings (2, 4, 8, 16 km... capped at the max radius) and UnitAssigner
 (package-private: claim + ASSIGNED + save trip + publish UnitAssigned, shared by Dispatcher and SupportDispatcher).
@@ -75,7 +77,8 @@ Constructor shapes:
 - SupportDispatcher(cases, patients, resources, claimer, assignments, decider, publisher, clock)
 - DispatchCoordinator(dispatcher, preemptor, supportDispatcher, queue)
 - Assignment(caseId, resourceId, role, assignedAt); UnitAssigned(assignmentId, caseId, resourceId, role, occurredAt)
-- VitalsProcessor(patients, vitals, scorer, caseManager, clock, maxAge)
+- VitalsProcessor(patients, cases, vitals, scorer, caseManager, upgrader, clock, maxAge)
+- ResponseUpgrader(assignments, resources, patients, decider, assignmentManager, caseManager)
 - Tests build deciders with `new LadderResponseDecider()`.
 - AssignmentManager and ResponseRecovery methods take an ASSIGNMENT id (not a case id); AssignmentManager methods
   return the updated Assignment. Tests that only know the case use a per-file helper tripOf(caseId).
@@ -166,11 +169,26 @@ MetricsCollector builds SimulationReport from events (+ worst band per case from
 Engine settings in the sim: ack 60 s, signal 30 s, stall 120 s, radius 20 km, maxAge 10 min.
 Known sim limits: crews effectively answer after 10 s (first tick in the same step as the assignment); same seed
 gives the same city but engine ids are random UUIDs, so runs can differ slightly (BACKLOG).
-The simulator found the response-upgrade gap (nurse stays the only help when MEDIUM turns CRITICAL): top of BACKLOG.
+Report also counts responses upgraded; firstRespondersSent includes units demoted to first responder; "reassigned"
+excludes upgrades (only cases that LOST a unit).
+
+## Response upgrade (DONE, tested), found by the simulator
+Problem: a gradually deteriorating patient first hits MEDIUM -> nurse sent; a minute later CRITICAL, but RESPONDING
+cases only got a band update, so the nurse stayed the only help. Fix: VitalsProcessor copies the open case's band
+BEFORE caseManager.handle (same Case object is changed in place), then calls
+ResponseUpgrader.upgradeIfWorse(case, previousBand). It acts only if the band went UP (edge-triggered; a patient who
+improves keeps the stronger unit) and the case is RESPONDING, and the active PRIMARY trip's unit type is NOT in the new
+plan's primaryTypes: then assignmentManager.demoteToSupport(trip) (Assignment.demoteToSupport: PRIMARY -> SUPPORT once,
+not if ended; publishes AssignmentRoleChanged; unit keeps driving) and caseManager.onAssignmentLost(case) (requeued,
+keeps its openedAt). The dispatch loop then sends a proper unit; SupportDispatcher sends no extra responder (one SUPPORT
+already active); when the new primary arrives, the demoted unit stands down (DONE if arrived, else CANCELLED).
+Only RESPONDING cases for now (STABILISED getting worse could reuse it later). In the sim: about 6 upgrades per run,
+demoted nurses arrive minutes before the ambulance.
 
 ## Next steps after that
-1. Fix "upgrade the response when a case gets worse" (and maybe "unit back in service") from BACKLOG.md.
-2. JavaFX window in a separate module dispatch-sim-fx: Simulation gets snapshot() -> WorldSnapshot; AnimationTimer
+1. JavaFX window in a separate module dispatch-sim-fx: Simulation gets snapshot() -> WorldSnapshot; AnimationTimer
    calls step(); Canvas map + side panel; SimulatorLauncher with a plain main. User is new to JavaFX: explain.
-3. Then the Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
+   The user creates Maven modules themselves; give them step-by-step module instructions first.
+2. Then the Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
+3. Remaining BACKLOG.md items (unit back in service, head-of-line blocking, ...) when there is time.
 4. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
