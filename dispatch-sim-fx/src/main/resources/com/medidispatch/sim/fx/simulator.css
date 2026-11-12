@@ -1,0 +1,50 @@
+/* Styling for the simulator window. JavaFX CSS works like web CSS, with -fx- in front of each property. */
+
+.root {
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 13px;
+    -fx-background-color: #faf9f5;
+}
+
+.side-panel {
+    -fx-padding: 14;
+    -fx-spacing: 10;
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e3e1d9;
+    -fx-border-width: 0 0 0 1;          /* a thin line on the left only */
+}
+
+.clock {
+    -fx-font-family: "Consolas";
+    -fx-font-size: 26px;
+    -fx-font-weight: bold;
+}
+
+.section-title {
+    -fx-text-fill: #888780;
+    -fx-font-size: 11px;
+    -fx-padding: 6 0 0 0;
+}
+
+.counter-name {
+    -fx-text-fill: #5f5e5a;
+}
+
+.counter-value {
+    -fx-font-weight: bold;
+}
+
+.event-log, .report {
+    -fx-font-family: "Consolas";
+    -fx-font-size: 11px;
+}
+
+.button, .toggle-button {
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+
+.toggle-button:selected {
+    -fx-background-color: #2c2c2a;
+    -fx-text-fill: white;
+}
