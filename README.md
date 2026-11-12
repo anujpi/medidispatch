@@ -203,7 +203,9 @@ A console simulator (`dispatch-sim`) runs the whole engine end to end on a fake 
 
 The simulator has already found, and helped fix, a real gap that 486 unit tests could not: a patient who deteriorates gradually first crosses into MEDIUM and gets a nurse, but nothing upgraded the response when they turned CRITICAL a minute later. Now the engine re-checks the response whenever a patient gets worse while help is on the way: if the unit coming is no longer enough, it stays on as a first responder and a proper ambulance is sent. In a typical run six responses are upgraded, and the nurse who was already on the way reaches the patient minutes before the ambulance.
 
-**In progress:** a JavaFX window that shows the simulated city moving live. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+A JavaFX window (`dispatch-sim-fx`) shows the same simulation live: a map of the city with patients coloured by how ill they are, ambulances, nurses and doctors driving to them along dashed lines, broken-down and silent units marked, and a side panel with the simulated clock, play/pause/step and speed controls (10x, 60x, 300x), live counters and a readable log of what the engine just did ("nurse-6 now first responder (p17 got worse)"). When the run ends, the report appears in the panel. The window only reads read-only snapshots of the simulation, so the engine and the simulator stay free of any UI code.
+
+**In progress:** the Spring layer that turns the engine into a running service. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -229,7 +231,7 @@ The simulator has already found, and helped fix, a real gap that 486 unit tests 
 - [x] Patient and unit simulator (console, with injected failures and a report)
 - [x] Upgrade the response when a case gets worse (found by the simulator)
 - [ ] The other known gaps in [BACKLOG.md](BACKLOG.md)
-- [ ] Simulator window (JavaFX): the city, patients and units moving live
+- [x] Simulator window (JavaFX): the city, patients and units moving live
 - [ ] Scorer comparison in the simulator (once a second scorer exists)
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
@@ -255,7 +257,9 @@ cd medidispatch
 mvn test
 ```
 
-The engine is a library, so there is no server to start yet. The quickest way to see it work is the simulator: run `SimulatorMain` in `dispatch-sim` (in IntelliJ, press the run button next to `main`; pass a number as the program argument to use another seed). It prints a report like this:
+The engine is a library, so there is no server to start yet. The quickest way to see it work is the simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+
+For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
 ```
 MediDispatch simulation, 120 min simulated
@@ -309,10 +313,15 @@ medidispatch/
   dispatch-sim/               console simulator: a fake city running on the real engine
     src/main/java/com/medidispatch/sim/
                               Simulation (wires the engine and runs the loop), SimulatedPatient, SimulatedUnit,
-                              SimulationConfig, MetricsCollector, SimulationReport, SimulatorMain
+                              SimulationConfig, MetricsCollector, SimulationReport, WorldSnapshot, EventLog,
+                              SimulatorMain
+  dispatch-sim-fx/            JavaFX window for the simulator
+    src/main/java/com/medidispatch/sim/fx/
+                              SimulatorLauncher (run this), SimulatorApp (window and animation loop), MapView (canvas
+                              map), SidePanel (controls, counters, log), MapProjection, TickPacer
+    src/main/resources/...    simulator.css
   BACKLOG.md                  known gaps to tackle later
   (planned)
-  dispatch-sim-fx/            JavaFX window for the simulator
   dispatch-service/  ingestion-service/  fleet-service/  hospital-service/
   tracking-service/  notification-service/  dashboard/  deploy/  docs/
 ```
@@ -329,7 +338,8 @@ Every component is covered by tests, including:
 - "nothing happens" tests: repeating an assessment, or attempting an illegal move, changes no state and publishes no events,
 - time-based tests driven by a controllable clock, so "the unit stayed silent for 60 seconds" runs instantly, including the recovery scenario where the nearest ambulance goes silent and the next one is sent.
 
-- end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own.
+- end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own,
+- window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale) and the frame pacer (exact speed, leftover time carried between frames, long freezes capped).
 
 Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
 

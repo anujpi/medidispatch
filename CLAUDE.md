@@ -32,7 +32,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (538 tests: 503 in dispatch-core, 35 in dispatch-sim)
+## Built so far (565 tests: 503 in dispatch-core, 50 in dispatch-sim, 12 in dispatch-sim-fx)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -95,8 +95,11 @@ Known gaps and small cleanups are all listed in BACKLOG.md (keep it up to date; 
 mvn is not on PATH for Claude. Claude can compile and run the whole suite with IntelliJ's bundled JDK
 ("C:/Program Files/JetBrains/IntelliJ IDEA 2026.2.0.1/jbr/bin" javac/java) plus the JUnit 5.11.4 / platform 1.11.4
 jars from ~/.m2, building into its scratchpad (nothing written to the project). Classpaths need Windows paths (cygpath -w).
-Compile order: core main, core test, sim main (cp core main), sim test; run with a small JUnit launcher over package
-com.medidispatch. The user runs things from IntelliJ (Ctrl twice -> mvn test from the root medidispatch project).
+Compile order: core main, core test, sim main (cp core main), sim test, fx main (cp core + sim main + JavaFX 21.0.5
+-win jars from ~/.m2/repository/org/openjfx; copy src/main/resources into the output), fx test; run with a small JUnit
+launcher over package com.medidispatch. The window can be opened briefly with
+`timeout 25 java --enable-native-access=ALL-UNNAMED -cp ... com.medidispatch.sim.fx.SimulatorLauncher` (it pops up on
+the user's screen). The user runs things from IntelliJ (Ctrl twice -> mvn test from the root medidispatch project).
 
 ## Live trip monitoring (DONE, tested)
 UnitTracker records position reports (facts only); TripMonitor judges EN_ROUTE trips: silent for signalTimeout (30 s
@@ -185,10 +188,26 @@ already active); when the new primary arrives, the demoted unit stands down (DON
 Only RESPONDING cases for now (STABILISED getting worse could reuse it later). In the sim: about 6 upgrades per run,
 demoted nurses arrive minutes before the ambulance.
 
+## Simulator window: dispatch-sim-fx module (DONE, tested), package com.medidispatch.sim.fx
+Maven module depending on dispatch-sim (dispatch-core comes transitively) + org.openjfx:javafx-controls 21.0.5 +
+javafx-maven-plugin 0.0.8 (mainClass SimulatorLauncher). Classpath mode on purpose: NO module-info.java (the user first
+created the module with IntelliJ's JavaFX generator; its module-info/FXML/mvnw files were removed).
+dispatch-sim side: Simulation.snapshot() -> WorldSnapshot (public record: time, CityBounds, PatientView(id, home,
+Optional band of open case), UnitView(id, type, position, UnitState, Optional target, Optional role), waitingCases,
+recentEvents (EventLog: readable lines, newest first, last 20, routine events left out), report, finished).
+UnitState: FREE, ANSWERING, DRIVING, ON_SCENE, BROKEN_DOWN, NO_SIGNAL, OFFLINE (engine OFFLINE wins).
+fx side: SimulatorLauncher (plain main -> Application.launch; run THIS, not SimulatorApp), SimulatorApp (BorderPane:
+MapView centre, SidePanel right; AnimationTimer on the JavaFX thread: TickPacer.ticksFor(elapsed) -> step() x n ->
+snapshot -> draw/update; no other threads), MapView (Canvas 640x640, layers: background+2 km grid, dashed trip lines,
+patients by band colour, units by type shape, legend), SidePanel (VBox: clock, Play/Pause, Step, speed ToggleGroup
+10/60/300x, counters GridPane, event log ListView, report TextArea when finished; buttons call callbacks set by the
+app), MapProjection and TickPacer (pure logic, unit-tested; "humble object"), simulator.css in resources.
+Harmless warnings when running: "Unsupported JavaFX configuration: unnamed module" (classpath mode) and native access /
+sun.misc.Unsafe warnings from inside JavaFX 21 (VM option --enable-native-access=ALL-UNNAMED hides one).
+
 ## Next steps after that
-1. JavaFX window in a separate module dispatch-sim-fx: Simulation gets snapshot() -> WorldSnapshot; AnimationTimer
-   calls step(); Canvas map + side panel; SimulatorLauncher with a plain main. User is new to JavaFX: explain.
+1. The Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
    The user creates Maven modules themselves; give them step-by-step module instructions first.
-2. Then the Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
-3. Remaining BACKLOG.md items (unit back in service, head-of-line blocking, ...) when there is time.
-4. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
+2. Remaining BACKLOG.md items (unit back in service, head-of-line blocking, ...) when there is time.
+3. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
+4. Possible window extras later: restart with a new seed, settings form, scorer comparison.
