@@ -11,6 +11,7 @@
     <modules>
         <module>dispatch-core</module>
         <module>dispatch-sim</module>
+        <module>dispatch-sim-fx</module>
     </modules>
 
     <properties>
