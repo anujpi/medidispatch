@@ -22,35 +22,58 @@ final class CityMap {
     private CityMap() {}
 
     /**
-     * A random point inside the city.
+     * A random point inside the standard {@link #SIZE_KM} city.
      *
      * @param random where the randomness comes from
      * @return a point at most {@link #SIZE_KM}/2 from the centre in each direction
      */
     static Location randomPoint(Random random) {
-        double lat = CENTER.latitude() + (random.nextDouble() * 2 - 1) * halfLatitude();
-        double lon = CENTER.longitude() + (random.nextDouble() * 2 - 1) * halfLongitude();
+        return randomPoint(random, SIZE_KM);
+    }
+
+    /**
+     * A random point inside a city of the given size.
+     *
+     * @param random where the randomness comes from
+     * @param sizeKm the city's width and height in kilometres
+     * @return a point at most {@code sizeKm}/2 from the centre in each direction
+     */
+    static Location randomPoint(Random random, double sizeKm) {
+        double lat = CENTER.latitude() + (random.nextDouble() * 2 - 1) * halfLatitude(sizeKm);
+        double lon = CENTER.longitude() + (random.nextDouble() * 2 - 1) * halfLongitude(sizeKm);
         return new Location(lat, lon);
     }
 
     /**
-     * The edges of the city, for drawing it.
+     * The edges of the standard {@link #SIZE_KM} city, for drawing it.
      *
      * @return the smallest and largest latitude and longitude inside the city
      */
     static WorldSnapshot.CityBounds bounds() {
-        return new WorldSnapshot.CityBounds(CENTER.latitude() - halfLatitude(), CENTER.longitude() - halfLongitude(),
-                                            CENTER.latitude() + halfLatitude(), CENTER.longitude() + halfLongitude());
+        return bounds(SIZE_KM);
+    }
+
+    /**
+     * The edges of a city of the given size, for drawing it.
+     *
+     * @param sizeKm the city's width and height in kilometres
+     * @return the smallest and largest latitude and longitude inside the city
+     */
+    static WorldSnapshot.CityBounds bounds(double sizeKm) {
+        double halfLat = halfLatitude(sizeKm);
+        double halfLon = halfLongitude(sizeKm);
+        return new WorldSnapshot.CityBounds(CENTER.latitude() - halfLat, CENTER.longitude() - halfLon,
+                                            CENTER.latitude() + halfLat, CENTER.longitude() + halfLon);
     }
 
     // half the city's height, in degrees of latitude
-    private static double halfLatitude() {
-        return SIZE_KM / 2 / KM_PER_DEGREE_LATITUDE;
+    private static double halfLatitude(double sizeKm) {
+        return sizeKm / 2 / KM_PER_DEGREE_LATITUDE;
     }
 
     // half the city's width, in degrees of longitude (a degree of longitude gets shorter away from the equator)
-    private static double halfLongitude() {
-        return SIZE_KM / 2 / (KM_PER_DEGREE_LATITUDE * Math.cos(Math.toRadians(CENTER.latitude())));
+    private static double halfLongitude(double sizeKm) {
+        return sizeKm / 2 / (KM_PER_DEGREE_LATITUDE * Math.cos(Math.toRadians(CENTER.latitude())));
     }
 
     /**

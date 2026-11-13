@@ -1,66 +1,74 @@
 package com.medidispatch.sim.fx;
 
-import com.medidispatch.sim.Simulation;
-import com.medidispatch.sim.SimulationConfig;
+import com.medidispatch.sim.LiveConfig;
+import com.medidispatch.sim.LiveSimulation;
 import com.medidispatch.sim.WorldSnapshot;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.BorderPane;
 import javafx.stage.Stage;
 
 /**
- * The simulator window: the map on the left, the side panel on the right, and an animation loop that plays the
- * simulation at the chosen speed.
+ * The simulator window: the map on the left, the side panel on the right, showing a live, endless, random city.
  * <p>
- * Everything runs on the JavaFX thread: the {@link AnimationTimer} steps the simulation and redraws, and the
- * buttons only change whether it plays and how fast. No other threads, so nothing needs locking.
+ * The city runs on its own threads ({@link LiveSimulation}). This window never steps it: every frame, the
+ * {@link AnimationTimer} (on the JavaFX thread) just picks up the latest snapshot the engine published and draws it
+ * if it is new. The buttons only pause, resume or change the speed. Closing the window stops the threads.
  * Start it with {@link SimulatorLauncher}.
  */
 public final class SimulatorApp extends Application {
 
-    private static final int START_SPEED = 60;
-
-    private Simulation simulation;
-    private TickPacer pacer;
+    private LiveSimulation live;
     private MapView map;
     private SidePanel panel;
-    private boolean playing = true;
-    private long lastFrameNanos = -1;     // -1 until the first frame
+    private BorderPane root;
+    private Theme theme = Theme.DARK;
+    private WorldSnapshot latest;
+    private String selectedId;
 
     @Override
     public void start(Stage stage) {
-        SimulationConfig config = SimulationConfig.defaults();
-        simulation = new Simulation(config);
-        pacer = new TickPacer(config.tick(), START_SPEED);
+        LiveConfig config = LiveConfig.bigCity();
+        live = new LiveSimulation(config);
         map = new MapView();
-        panel = new SidePanel(START_SPEED);
+        panel = new SidePanel(config.startSpeed(), live.startTime());
 
         panel.setOnPlayPause(() -> {
-            playing = !playing;
-            panel.showPlaying(playing);
-            pacer.reset();                                        // no burst of saved-up time after a pause
-        });
-        panel.setOnStep(() -> {
-            if (!simulation.finished()) {
-                simulation.step();
-                redraw();
+            if (live.paused()) {
+                live.resume();
+            } else {
+                live.pause();
             }
+            panel.showPlaying(!live.paused());
         });
-        panel.setOnSpeed(speed -> pacer.setSpeed(speed));
+        panel.setOnSpeed(speed -> live.setSpeed(speed));
+        panel.setOnToggleTheme(() -> applyTheme(theme.other()));
+        panel.setOnResetView(() -> map.resetView());
+        map.setOnSelect(id -> {
+            selectedId = id;
+            panel.showDetails(id == null ? "" : Selection.describe(latest, id));
+        });
 
-        BorderPane root = new BorderPane();
+        ScrollPane side = new ScrollPane(panel);                  // scrolls if the window is short
+        side.setFitToWidth(true);
+        side.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        side.getStyleClass().add("side-scroll");
+        root = new BorderPane();
         root.setCenter(map);
-        root.setRight(panel);
-        Scene scene = new Scene(root);
+        root.setRight(side);
+        Scene scene = new Scene(root, 1080, 780);
         scene.getStylesheets().add(getClass().getResource("simulator.css").toExternalForm());
+        applyTheme(theme);
 
-        stage.setTitle("MediDispatch simulator (seed " + config.seed() + ")");
+        stage.setTitle("MediDispatch live simulator (layout seed " + config.seed() + ")");
         stage.setScene(scene);
-        stage.setResizable(false);
+        stage.setMinWidth(820);
+        stage.setMinHeight(560);
         stage.show();
-        redraw();
 
+        live.start();
         new AnimationTimer() {
             @Override
             public void handle(long now) {
@@ -69,25 +77,33 @@ public final class SimulatorApp extends Application {
         }.start();
     }
 
-    // called about 60 times a second, on the JavaFX thread
-    private void onFrame(long nowNanos) {
-        long elapsed = lastFrameNanos < 0 ? 0 : nowNanos - lastFrameNanos;
-        lastFrameNanos = nowNanos;
-        if (!playing || simulation.finished()) {
-            return;
-        }
-        int ticks = pacer.ticksFor(elapsed);
-        for (int i = 0; i < ticks && !simulation.finished(); i++) {
-            simulation.step();
-        }
-        if (ticks > 0) {
-            redraw();                                             // nothing changed, nothing to repaint
+    /** Called by JavaFX when the window closes: stop the simulation's threads. */
+    @Override
+    public void stop() {
+        if (live != null) {
+            live.stop();
         }
     }
 
-    private void redraw() {
-        WorldSnapshot snapshot = simulation.snapshot();
-        map.draw(snapshot);
-        panel.update(snapshot);
+    // called about 60 times a second, on the JavaFX thread
+    private void onFrame(long nowNanos) {
+        WorldSnapshot newest = live.latestSnapshot();
+        if (newest != latest) {                                   // the engine published a new picture
+            latest = newest;
+            map.show(latest);
+            panel.update(latest);
+            if (selectedId != null) {
+                panel.showDetails(Selection.describe(latest, selectedId));
+            }
+        }
+        map.animate(nowNanos);                                    // every frame, so the pulse is smooth
+    }
+
+    private void applyTheme(Theme next) {
+        theme = next;
+        root.getStyleClass().removeAll(Theme.LIGHT.cssClass(), Theme.DARK.cssClass());
+        root.getStyleClass().add(theme.cssClass());               // the stylesheet colours the panel to match
+        map.setTheme(theme);
+        panel.showTheme(theme);
     }
 }

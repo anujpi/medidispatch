@@ -73,22 +73,18 @@ public final class Simulation {
     /** How long an ambulance crew stays with the patient before the case is closed. */
     static final Duration ON_SCENE = Duration.ofMinutes(10);
 
-    private static final Duration ACK_TIMEOUT = Duration.ofSeconds(60);
-    private static final Duration SIGNAL_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration STALL_TIMEOUT = Duration.ofSeconds(120);
-    private static final Duration MAX_READING_AGE = Duration.ofMinutes(10);
     private static final double SEARCH_RADIUS_KM = 20.0;
 
     private final SimulationConfig config;
     private final Instant end;
     private final MutableClock clock = new MutableClock(START);
 
-    // the engine
-    private final InMemoryCaseQueue queue = new InMemoryCaseQueue();
-    private final InMemoryCaseRepository cases = new InMemoryCaseRepository();
-    private final InMemoryResourceRepository resources = new InMemoryResourceRepository();
-    private final InMemoryAssignmentRepository assignments = new InMemoryAssignmentRepository();
-    private final InMemoryEventPublisher events = new InMemoryEventPublisher();
+    // the engine, built by EngineParts
+    private final InMemoryCaseQueue queue;
+    private final InMemoryCaseRepository cases;
+    private final InMemoryResourceRepository resources;
+    private final InMemoryAssignmentRepository assignments;
+    private final InMemoryEventPublisher events;
     private final CaseManager caseManager;
     private final AssignmentManager assignmentManager;
     private final DispatchCoordinator coordinator;
@@ -103,10 +99,10 @@ public final class Simulation {
     private final Map<String, Random> unitDice = new LinkedHashMap<>();
     private final Map<String, Instant> onSceneSince = new LinkedHashMap<>();
     private final MetricsCollector metrics = new MetricsCollector();
-    private final EventLog log = new EventLog(cases);
+    private final EventLog log;
     private Instant nextReadingAt = START.plus(READING_INTERVAL);
-    private int eventsSeen;
-    private int eventsLogged;
+    private int eventsSeen;                 // bookmark for the units (trip orders)
+    private int eventsCounted;              // bookmark for the event log and the metrics
 
     /**
      * Builds the engine and the city.
@@ -121,28 +117,22 @@ public final class Simulation {
         this.config = config;
         this.end = START.plus(config.duration());
 
-        // 1. the engine, wired by hand (Spring will do this part later)
-        InMemoryPatientRepository patientRepo = new InMemoryPatientRepository();
-        InMemoryResourceClaimer claimer = new InMemoryResourceClaimer();
-        ResponseDecider decider = new LadderResponseDecider();
-
-        caseManager = new CaseManager(cases, queue, events, clock);
-        assignmentManager = new AssignmentManager(assignments, resources, claimer, events, clock);
-        ResponseRecovery recovery = new ResponseRecovery(assignmentManager, caseManager);
-        Dispatcher dispatcher = new Dispatcher(queue, patientRepo, resources, claimer, assignments, decider,
-                events, clock, SEARCH_RADIUS_KM);
-        Preemptor preemptor = new Preemptor(assignments, cases, resources, patientRepo, decider, recovery,
-                SEARCH_RADIUS_KM);
-        SupportDispatcher support = new SupportDispatcher(cases, patientRepo, resources, claimer, assignments,
-                decider, events, clock);
-        coordinator = new DispatchCoordinator(dispatcher, preemptor, support, queue);
-        unitTracker = new UnitTracker(resources, clock);
-        timeoutMonitor = new TimeoutMonitor(assignments, recovery, clock, ACK_TIMEOUT);
-        tripMonitor = new TripMonitor(assignments, resources, recovery, clock, SIGNAL_TIMEOUT, STALL_TIMEOUT);
-        ResponseUpgrader upgrader = new ResponseUpgrader(assignments, resources, patientRepo, decider,
-                assignmentManager, caseManager);
-        processor = new VitalsProcessor(patientRepo, cases, new InMemoryVitalsRepository(), new SimpleScorer(clock),
-                caseManager, upgrader, clock, MAX_READING_AGE);
+        // 1. the engine, wired in one place (Spring will do this part later)
+        EngineParts engine = new EngineParts(clock, SEARCH_RADIUS_KM);
+        queue = engine.queue;
+        cases = engine.cases;
+        resources = engine.resources;
+        assignments = engine.assignments;
+        events = engine.events;
+        caseManager = engine.caseManager;
+        assignmentManager = engine.assignmentManager;
+        coordinator = engine.coordinator;
+        unitTracker = engine.unitTracker;
+        timeoutMonitor = engine.timeoutMonitor;
+        tripMonitor = engine.tripMonitor;
+        processor = engine.processor;
+        log = new EventLog(cases);
+        InMemoryPatientRepository patientRepo = engine.patients;
 
         // 2. the city: every random choice comes from the seed
         Random random = new Random(config.seed());
@@ -176,7 +166,7 @@ public final class Simulation {
         finishOnScene(now);         // 5. crews that have been on scene long enough finish
         timeoutMonitor.checkTimeouts();   // 6. the engine checks for silent and stuck units
         tripMonitor.checkTrips();
-        logNewEvents();                   // 7. readable lines for the window
+        countNewEvents();                 // 7. the event log and the statistics
     }
 
     /**
@@ -197,7 +187,8 @@ public final class Simulation {
      * @return the current report
      */
     public SimulationReport report() {
-        return metrics.report(events.published(), Duration.between(START, clock.instant()));
+        countNewEvents();                                     // so a mid-step report is up to date too
+        return metrics.report(Duration.between(START, clock.instant()));
     }
 
     /**
@@ -272,16 +263,15 @@ public final class Simulation {
 
     // the simulator learns about trips only from the engine's events, like a crew's app would
     private void applyNewEvents() {
-        List<DomainEvent> all = events.published();
-        for (int i = eventsSeen; i < all.size(); i++) {
-            DomainEvent e = all.get(i);
+        List<DomainEvent> fresh = events.publishedSince(eventsSeen);
+        for (DomainEvent e : fresh) {
             if (e instanceof UnitAssigned assigned) {
                 startTrip(assigned);
             } else if (e instanceof AssignmentStatusChanged changed && changed.to().isTerminal()) {
                 endTrip(changed);
             }
         }
-        eventsSeen = all.size();
+        eventsSeen += fresh.size();
     }
 
     private void moveUnits(Instant now) {
@@ -327,13 +317,15 @@ public final class Simulation {
         }
     }
 
-    // the event log has its own bookmark, so it also sees events from the end of a step
-    private void logNewEvents() {
-        List<DomainEvent> all = events.published();
-        for (int i = eventsLogged; i < all.size(); i++) {
-            log.record(all.get(i));
+    // the event log and the statistics have their own bookmark, so they also see events from the end of a step;
+    // each event is counted exactly once
+    private void countNewEvents() {
+        List<DomainEvent> fresh = events.publishedSince(eventsCounted);
+        for (DomainEvent e : fresh) {
+            log.record(e);
+            metrics.onEvent(e);
         }
-        eventsLogged = all.size();
+        eventsCounted += fresh.size();
     }
 
     // ---------- helpers ----------

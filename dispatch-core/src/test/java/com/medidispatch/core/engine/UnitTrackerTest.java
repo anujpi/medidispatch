@@ -2,6 +2,7 @@ package com.medidispatch.core.engine;
 
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
+import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.memory.InMemoryResourceRepository;
 import org.junit.jupiter.api.Test;
@@ -86,5 +87,29 @@ public class UnitTrackerTest {
     void constructorRejectsMissingCollaborators() {
         assertThrows(IllegalArgumentException.class, () -> new UnitTracker(null, clock));
         assertThrows(IllegalArgumentException.class, () -> new UnitTracker(resources, null));
+    }
+
+    // ---------- back in service ----------
+
+    @Test
+    void aRepairedUnitComesBackIntoService() {
+        addUnit("als-1");
+        Resource broken = unit("als-1");
+        broken.transitionTo(ResourceStatus.OFFLINE);
+        resources.save(broken);
+
+        tracker.onBackInService("als-1");
+
+        assertEquals(ResourceStatus.AVAILABLE, unit("als-1").status());
+    }
+
+    @Test
+    void onlyAnOfflineUnitCanComeBackAndNothingChangesOtherwise() {
+        addUnit("als-1");
+
+        assertThrows(IllegalStateException.class, () -> tracker.onBackInService("als-1"));     // already available
+        assertEquals(ResourceStatus.AVAILABLE, unit("als-1").status());
+        assertThrows(IllegalStateException.class, () -> tracker.onBackInService("ghost"));
+        assertThrows(IllegalArgumentException.class, () -> tracker.onBackInService(" "));
     }
 }

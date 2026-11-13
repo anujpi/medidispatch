@@ -10,11 +10,13 @@ import java.util.Optional;
 /**
  * In-memory {@link CaseRepository} for tests and the simulator. Not thread-safe.
  * <p>
- * {@link #findOpenByPatientId(String)} scans every case; a database adapter would use an index instead.
+ * {@link #findOpenByPatientId(String)} uses a small index (patient to their latest saved open case), so it stays
+ * instant however many closed cases pile up, for example in an endless simulation.
  */
 public class InMemoryCaseRepository implements CaseRepository {
 
     private final Map<String,Case> byId = new HashMap<>();
+    private final Map<String,String> openCaseIdByPatient = new HashMap<>();
 
     @Override
     public void save(Case c) {
@@ -22,6 +24,9 @@ public class InMemoryCaseRepository implements CaseRepository {
             throw new IllegalArgumentException("case is required");
         }
         byId.put(c.id(),c);
+        if(!c.status().isTerminal()){
+            openCaseIdByPatient.put(c.patientId(), c.id());
+        }
     }
 
     @Override
@@ -37,11 +42,11 @@ public class InMemoryCaseRepository implements CaseRepository {
         if(patientId == null){
             throw new IllegalArgumentException("PatientId is required");
         }
-        for(Case c: byId.values()){
-            if(c.patientId().equals(patientId) && !c.status().isTerminal()){
-                return Optional.of(c);
-            }
+        String caseId = openCaseIdByPatient.get(patientId);
+        Case c = caseId == null ? null : byId.get(caseId);
+        if(c == null || c.status().isTerminal()){          // the case has been closed since it was indexed
+            return Optional.empty();
         }
-        return Optional.empty();
+        return Optional.of(c);
     }
 }

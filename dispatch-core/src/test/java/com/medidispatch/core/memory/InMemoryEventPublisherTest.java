@@ -68,4 +68,26 @@ public class InMemoryEventPublisherTest {
     void aNullEventIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> publisher.publish(null));
     }
+
+    // ---------- reading only new events ----------
+
+    @Test
+    void publishedSinceGivesOnlyTheEventsAfterTheBookmark() {
+        publisher.publish(event("a1"));
+        int bookmark = publisher.size();
+        publisher.publish(event("a2"));
+        publisher.publish(event("a3"));
+
+        assertEquals(List.of(event("a2"), event("a3")), publisher.publishedSince(bookmark));
+        assertEquals(3, publisher.size());
+        assertTrue(publisher.publishedSince(publisher.size()).isEmpty());
+    }
+
+    @Test
+    void publishedSinceRejectsABookmarkOutsideTheList() {
+        publisher.publish(event("a1"));
+
+        assertThrows(IllegalArgumentException.class, () -> publisher.publishedSince(-1));
+        assertThrows(IllegalArgumentException.class, () -> publisher.publishedSince(2));
+    }
 }

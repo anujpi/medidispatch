@@ -25,15 +25,30 @@ import java.util.Set;
 /**
  * Turns what happened during a run into a {@link SimulationReport}.
  * <p>
- * Almost everything comes from the engine's events (the same events a dashboard would see). The one thing the
- * events do not carry is a case's band, so the collector also remembers the worst band each case reached, from
- * the results of the readings.
+ * It is fed as things happen: every reading result ({@link #onReading(ProcessingResult)}) and every engine event
+ * ({@link #onEvent(DomainEvent)}), each exactly once. It keeps running notes instead of re-reading the whole
+ * history, so a run can go on for days without the report getting slower to build. The one thing the events do
+ * not carry is a case's band, so the worst band each case reached comes from the reading results.
  */
 final class MetricsCollector {
 
     private int readings;
     private int ignoredReadings;
     private final Map<String, RiskBand> worstBand = new HashMap<>();
+
+    // running notes, filled in by onEvent
+    private final Map<String, Instant> alertedAt = new HashMap<>();
+    private final Set<String> closed = new HashSet<>();
+    private final Map<String, AssignmentRole> roleOfTrip = new HashMap<>();
+    private final Map<String, Instant> ambulanceSentAt = new HashMap<>();
+    private final Map<String, Instant> ambulanceArrivedAt = new HashMap<>();
+    private final Map<String, Instant> responderArrivedAt = new HashMap<>();
+    private final Map<String, Integer> ambulanceTrips = new HashMap<>();
+    private final Map<String, Integer> upgrades = new HashMap<>();
+    private int timeouts;
+    private int failures;
+    private int preemptions;
+    private int respondersSent;
 
     /**
      * Records what happened to one reading.
@@ -56,64 +71,55 @@ final class MetricsCollector {
     }
 
     /**
-     * Builds the report from everything the engine announced.
+     * Records one engine event. Each event must be passed exactly once, in the order it was published.
      *
-     * @param events    every event of the run, in order
-     * @param simulated how much simulated time the run covered
+     * @param e what the engine announced
+     */
+    void onEvent(DomainEvent e) {
+        if (e instanceof CaseStatusChanged changed) {
+            if (changed.to() == CaseStatus.ALERTED) {
+                alertedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
+            }
+            if (changed.to() == CaseStatus.CLOSED) {
+                closed.add(changed.caseId());
+            }
+        } else if (e instanceof UnitAssigned assigned) {
+            roleOfTrip.put(assigned.assignmentId(), assigned.role());
+            if (assigned.role() == AssignmentRole.PRIMARY) {
+                ambulanceSentAt.putIfAbsent(assigned.caseId(), assigned.occurredAt());
+                ambulanceTrips.put(assigned.caseId(), ambulanceTrips.getOrDefault(assigned.caseId(), 0) + 1);
+            } else {
+                respondersSent++;
+            }
+        } else if (e instanceof AssignmentStatusChanged changed) {
+            AssignmentRole role = roleOfTrip.get(changed.assignmentId());
+            if (changed.to() == AssignmentStatus.ARRIVED) {
+                if (role == AssignmentRole.PRIMARY) {
+                    ambulanceArrivedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
+                } else {
+                    responderArrivedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
+                }
+            } else if (changed.to() == AssignmentStatus.TIMED_OUT) {
+                timeouts++;
+            } else if (changed.to() == AssignmentStatus.FAILED) {
+                failures++;
+            } else if (changed.to() == AssignmentStatus.CANCELLED && role == AssignmentRole.PRIMARY) {
+                preemptions++;                                // only preemption cancels an ambulance here
+            }
+        } else if (e instanceof AssignmentRoleChanged changed) {
+            roleOfTrip.put(changed.assignmentId(), changed.to());   // the unit is a first responder now
+            upgrades.put(changed.caseId(), upgrades.getOrDefault(changed.caseId(), 0) + 1);
+            respondersSent++;                                 // kept on the case as a first responder
+        }
+    }
+
+    /**
+     * Builds the report from the notes so far.
+     *
+     * @param simulated how much simulated time the run has covered
      * @return the report
      */
-    SimulationReport report(List<DomainEvent> events, Duration simulated) {
-        Map<String, Instant> alertedAt = new HashMap<>();
-        Set<String> closed = new HashSet<>();
-        Map<String, AssignmentRole> roleOfTrip = new HashMap<>();
-        Map<String, Instant> ambulanceSentAt = new HashMap<>();
-        Map<String, Instant> ambulanceArrivedAt = new HashMap<>();
-        Map<String, Instant> responderArrivedAt = new HashMap<>();
-        Map<String, Integer> ambulanceTrips = new HashMap<>();
-        Map<String, Integer> upgrades = new HashMap<>();
-        int timeouts = 0;
-        int failures = 0;
-        int preemptions = 0;
-        int respondersSent = 0;
-
-        for (DomainEvent e : events) {
-            if (e instanceof CaseStatusChanged changed) {
-                if (changed.to() == CaseStatus.ALERTED) {
-                    alertedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
-                }
-                if (changed.to() == CaseStatus.CLOSED) {
-                    closed.add(changed.caseId());
-                }
-            } else if (e instanceof UnitAssigned assigned) {
-                roleOfTrip.put(assigned.assignmentId(), assigned.role());
-                if (assigned.role() == AssignmentRole.PRIMARY) {
-                    ambulanceSentAt.putIfAbsent(assigned.caseId(), assigned.occurredAt());
-                    ambulanceTrips.put(assigned.caseId(), ambulanceTrips.getOrDefault(assigned.caseId(), 0) + 1);
-                } else {
-                    respondersSent++;
-                }
-            } else if (e instanceof AssignmentStatusChanged changed) {
-                AssignmentRole role = roleOfTrip.get(changed.assignmentId());
-                if (changed.to() == AssignmentStatus.ARRIVED) {
-                    if (role == AssignmentRole.PRIMARY) {
-                        ambulanceArrivedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
-                    } else {
-                        responderArrivedAt.putIfAbsent(changed.caseId(), changed.occurredAt());
-                    }
-                } else if (changed.to() == AssignmentStatus.TIMED_OUT) {
-                    timeouts++;
-                } else if (changed.to() == AssignmentStatus.FAILED) {
-                    failures++;
-                } else if (changed.to() == AssignmentStatus.CANCELLED && role == AssignmentRole.PRIMARY) {
-                    preemptions++;                            // only preemption cancels an ambulance here
-                }
-            } else if (e instanceof AssignmentRoleChanged changed) {
-                roleOfTrip.put(changed.assignmentId(), changed.to());   // the unit is a first responder now
-                upgrades.put(changed.caseId(), upgrades.getOrDefault(changed.caseId(), 0) + 1);
-                respondersSent++;                             // kept on the case as a first responder
-            }
-        }
-
+    SimulationReport report(Duration simulated) {
         // group each case's times by the worst band it reached
         Map<RiskBand, List<Double>> waits = new EnumMap<>(RiskBand.class);
         Map<RiskBand, List<Double>> responses = new EnumMap<>(RiskBand.class);

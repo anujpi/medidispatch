@@ -29,6 +29,30 @@ public class InMemoryEventPublisher implements EventPublisher {
     public List<DomainEvent> published(){
         return List.copyOf(events);
     }
+
+    /**
+     * Lists only the events published from a given position on, so a long-running reader does not copy
+     * everything again each time. Keep the last {@link #size()} as a bookmark and pass it next time.
+     *
+     * @param from the position of the first event wanted, 0 for the start
+     * @return the events from that position, in publishing order, as a copy
+     * @throws IllegalArgumentException if {@code from} is negative or past the end
+     */
+    public List<DomainEvent> publishedSince(int from) {
+        if (from < 0 || from > events.size()) {
+            throw new IllegalArgumentException("from must be between 0 and " + events.size() + ", got " + from);
+        }
+        return List.copyOf(events.subList(from, events.size()));
+    }
+
+    /**
+     * Counts the events published so far.
+     *
+     * @return how many events have been published
+     */
+    public int size() {
+        return events.size();
+    }
     /** Forgets every recorded event; tests call it after setup so they only see the events they care about. */
     public void clear(){
         events.clear();

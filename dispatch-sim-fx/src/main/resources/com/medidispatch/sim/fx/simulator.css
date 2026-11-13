@@ -1,17 +1,23 @@
-/* Styling for the simulator window. JavaFX CSS works like web CSS, with -fx- in front of each property. */
+/*
+ * Styling for the simulator window. JavaFX CSS works like web CSS, with -fx- in front of each property.
+ * The window's root gets the class "light" or "dark" (see Theme); the rules below colour the panel to match.
+ * -fx-base, -fx-background and -fx-control-inner-background are the three colours JavaFX's own look is built from,
+ * so setting them recolours buttons, lists and text areas in one go.
+ */
 
 .root {
     -fx-font-family: "Segoe UI";
     -fx-font-size: 13px;
-    -fx-background-color: #faf9f5;
 }
 
 .side-panel {
     -fx-padding: 14;
-    -fx-spacing: 10;
-    -fx-background-color: #ffffff;
-    -fx-border-color: #e3e1d9;
-    -fx-border-width: 0 0 0 1;          /* a thin line on the left only */
+    -fx-spacing: 8;
+}
+
+.side-scroll {
+    -fx-background-insets: 0;
+    -fx-padding: 0;
 }
 
 .clock {
@@ -21,13 +27,18 @@
 }
 
 .section-title {
-    -fx-text-fill: #888780;
     -fx-font-size: 11px;
     -fx-padding: 6 0 0 0;
 }
 
-.counter-name {
-    -fx-text-fill: #5f5e5a;
+.hint {
+    -fx-font-size: 11px;
+}
+
+.details {
+    -fx-font-size: 12px;
+    -fx-padding: 6;
+    -fx-background-radius: 6;
 }
 
 .counter-value {
@@ -44,7 +55,64 @@
     -fx-cursor: hand;
 }
 
-.toggle-button:selected {
+/* ---------- light ---------- */
+
+.root.light {
+    -fx-base: #ececec;
+    -fx-background: #faf9f5;
+    -fx-control-inner-background: #ffffff;
+}
+
+.light .side-panel {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e3e1d9;
+    -fx-border-width: 0 0 0 1;
+}
+
+.light .section-title, .light .hint {
+    -fx-text-fill: #888780;
+}
+
+.light .counter-name {
+    -fx-text-fill: #5f5e5a;
+}
+
+.light .details {
+    -fx-background-color: #f1efe8;
+}
+
+.light .toggle-button:selected {
     -fx-background-color: #2c2c2a;
     -fx-text-fill: white;
+}
+
+/* ---------- dark ---------- */
+
+.root.dark {
+    -fx-base: #2a2e35;
+    -fx-background: #14161a;
+    -fx-control-inner-background: #1e2127;
+}
+
+.dark .side-panel {
+    -fx-background-color: #1b1e23;
+    -fx-border-color: #2c3038;
+    -fx-border-width: 0 0 0 1;
+}
+
+.dark .section-title, .dark .hint {
+    -fx-text-fill: #8a8d95;
+}
+
+.dark .counter-name {
+    -fx-text-fill: #b4b2a9;
+}
+
+.dark .details {
+    -fx-background-color: #262a31;
+}
+
+.dark .toggle-button:selected {
+    -fx-background-color: #85b7eb;
+    -fx-text-fill: #14161a;
 }

@@ -11,7 +11,7 @@ Ordered roughly by priority inside each group.
       ambulance is ever sent. When the band rises while RESPONDING, the engine should check the case's new
       `ResponsePlan`: if the current primary unit's type is not in the new plan's primary types, send a proper
       unit (keeping the nurse on as a first responder, or standing them down).
-- [ ] **Unit back in service.** A unit whose trip timed out or failed goes `OFFLINE` and never returns: there is no
+- [x] **Unit back in service.** *Done: `UnitTracker.onBackInService`, used by the live simulator after repairs.* A unit whose trip timed out or failed goes `OFFLINE` and never returns: there is no
       "back in service" call yet. Add `AssignmentManager`/`UnitTracker`-level `onBackInService(unitId)`
       (`OFFLINE -> AVAILABLE`). The simulator will show the fleet shrinking without it. *Small; do first.*
 - [ ] **Head-of-line blocking in the dispatcher.** `dispatchNext()` only looks at the most urgent case. If that case

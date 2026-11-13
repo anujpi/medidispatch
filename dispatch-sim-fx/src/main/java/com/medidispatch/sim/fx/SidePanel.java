@@ -15,17 +15,21 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.function.IntConsumer;
 
 /**
- * The panel next to the map: the simulated clock, Play/Pause, Step and speed buttons, live counters, the event
- * log, and the final report when the run ends.
+ * The panel next to the map: the simulated clock (day and time), Play/Pause and speed buttons, the light/dark and
+ * Reset view buttons, details of the selected unit or patient, live counters, and either the event log or the
+ * statistics so far (the Report button switches between them).
  * <p>
  * It never touches the simulation. Buttons only call the actions the window hands in
- * ({@link #setOnPlayPause(Runnable)}, {@link #setOnStep(Runnable)}, {@link #setOnSpeed(IntConsumer)}), and
- * {@link #update(WorldSnapshot)} only shows what a snapshot says.
+ * ({@link #setOnPlayPause(Runnable)}, {@link #setOnSpeed(IntConsumer)},
+ * {@link #setOnToggleTheme(Runnable)}, {@link #setOnResetView(Runnable)}), and {@link #update(WorldSnapshot)} only
+ * shows what a snapshot says.
  */
 public final class SidePanel extends VBox {
 
@@ -34,9 +38,10 @@ public final class SidePanel extends VBox {
 
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneOffset.UTC);
 
-    private final Label clock = new Label("--:--:--");
+    private final Instant start;
+    private final Label clock = new Label("Day 1 --:--:--");
     private final Button playPause = new Button("Pause");
-    private final Button step = new Button("Step");
+    private final Button reportButton = new Button("Report");
     private final ToggleGroup speedGroup = new ToggleGroup();
     private final Label openCases = value();
     private final Label waiting = value();
@@ -46,27 +51,38 @@ public final class SidePanel extends VBox {
     private final Label timeouts = value();
     private final Label failures = value();
     private final Label responders = value();
+    private final Button themeButton = new Button();
+    private final Button resetView = new Button("Reset view");
+    private final Label details = new Label();
     private final ListView<String> log = new ListView<>();
     private final TextArea report = new TextArea();
 
     // what the buttons do; the window sets these
     private Runnable onPlayPause = () -> {};
-    private Runnable onStep = () -> {};
     private IntConsumer onSpeed = speed -> {};
+    private Runnable onToggleTheme = () -> {};
+    private Runnable onResetView = () -> {};
 
     /**
      * Builds the panel.
      *
      * @param initialSpeed the speed button selected at the start; one of {@link #SPEEDS}
+     * @param start        when the simulation started, in simulated time; the clock counts days from it
      */
-    public SidePanel(int initialSpeed) {
+    public SidePanel(int initialSpeed, Instant start) {
+        this.start = start;
         getStyleClass().add("side-panel");
         setPrefWidth(300);
         clock.getStyleClass().add("clock");
 
         playPause.setOnAction(e -> onPlayPause.run());
-        step.setOnAction(e -> onStep.run());
-        HBox controls = new HBox(8, playPause, step);
+        reportButton.setOnAction(e -> {
+            boolean showReport = !report.isVisible();         // swap the log and the report
+            showNode(report, showReport);
+            showNode(log, !showReport);
+            reportButton.setText(showReport ? "Event log" : "Report");
+        });
+        HBox controls = new HBox(8, playPause, reportButton);
 
         HBox speeds = new HBox(4);
         for (int speed : SPEEDS) {
@@ -92,19 +108,68 @@ public final class SidePanel extends VBox {
         addCounter(counters, 0, 3, "Timeouts", timeouts);
         addCounter(counters, 2, 3, "Failures", failures);
 
+        themeButton.setOnAction(e -> onToggleTheme.run());
+        resetView.setOnAction(e -> onResetView.run());
+        HBox view = new HBox(8, themeButton, resetView);
+        Label hint = new Label("Drag to move, scroll to zoom, click a dot for details, double-click to reset.");
+        hint.getStyleClass().add("hint");
+        hint.setWrapText(true);
+
+        details.getStyleClass().add("details");
+        details.setWrapText(true);
+        showDetails("");
+
         log.getStyleClass().add("event-log");
-        log.setPrefHeight(300);
+        log.setPrefHeight(220);
         log.setFocusTraversable(false);
 
         report.getStyleClass().add("report");
         report.setEditable(false);
         report.setPrefRowCount(16);
-        showNode(report, false);                                  // appears when the run ends
+        showNode(report, false);                                  // appears when Report is clicked
 
         getChildren().addAll(clock, controls,
                 sectionTitle("Speed (simulated seconds per real second)"), speeds,
+                sectionTitle("Map"), view, hint,
+                sectionTitle("Selected"), details,
                 sectionTitle("Now"), counters,
                 sectionTitle("What the engine just did"), log, report);
+    }
+
+    /**
+     * Sets what happens when the light/dark button is clicked.
+     *
+     * @param action the action to run
+     */
+    public void setOnToggleTheme(Runnable action) {
+        this.onToggleTheme = action;
+    }
+
+    /**
+     * Sets what happens when Reset view is clicked.
+     *
+     * @param action the action to run
+     */
+    public void setOnResetView(Runnable action) {
+        this.onResetView = action;
+    }
+
+    /**
+     * Shows which theme is on, by offering the other one on the button.
+     *
+     * @param theme the theme in use
+     */
+    public void showTheme(Theme theme) {
+        themeButton.setText(theme == Theme.DARK ? "Light mode" : "Dark mode");
+    }
+
+    /**
+     * Shows what is known about the selected unit or patient.
+     *
+     * @param text one line of details, or an empty string when nothing is selected
+     */
+    public void showDetails(String text) {
+        details.setText(text.isEmpty() ? "Nothing selected. Click a unit or patient on the map." : text);
     }
 
     /**
@@ -114,15 +179,6 @@ public final class SidePanel extends VBox {
      */
     public void setOnPlayPause(Runnable action) {
         this.onPlayPause = action;
-    }
-
-    /**
-     * Sets what happens when Step is clicked.
-     *
-     * @param action the action to run
-     */
-    public void setOnStep(Runnable action) {
-        this.onStep = action;
     }
 
     /**
@@ -144,13 +200,13 @@ public final class SidePanel extends VBox {
     }
 
     /**
-     * Shows what a snapshot says: the clock, the counters and the latest events, and the report once the run
-     * has finished.
+     * Shows what a snapshot says: the clock, the counters, the latest events and the statistics so far.
      *
      * @param snapshot the city at one moment
      */
     public void update(WorldSnapshot snapshot) {
-        clock.setText(CLOCK.format(snapshot.time()));
+        long day = Duration.between(start, snapshot.time()).toDays() + 1;
+        clock.setText("Day " + day + "  " + CLOCK.format(snapshot.time()));
 
         int open = 0;
         for (PatientView patient : snapshot.patients()) {
@@ -181,13 +237,10 @@ public final class SidePanel extends VBox {
             log.getItems().setAll(snapshot.recentEvents());
         }
 
-        if (snapshot.finished() && !report.isVisible()) {
+        if (report.isVisible()) {
+            double scroll = report.getScrollTop();
             report.setText(r.toText());
-            showNode(log, false);                                  // the report takes the log's place
-            showNode(report, true);
-            playPause.setText("Finished");
-            playPause.setDisable(true);
-            step.setDisable(true);
+            report.setScrollTop(scroll);                           // keep the reader's place as it refreshes
         }
     }
 
