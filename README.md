@@ -197,13 +197,15 @@ The escalation ladder works in memory: each case gets a response plan, an ordere
 
 First responders work in memory: for a critical case, the engine sends the ambulance and, if a doctor or nurse is free and closer than the ambulance, that responder too, so care starts minutes earlier. The responder is best-effort (never queued, never preempting anyone), stands down when the ambulance arrives, and losing one never puts the case back in the queue; losing the ambulance does, while the responder keeps going. Every trip is handled by its own id, since a case can now have two units on it.
 
-Incoming readings have a single front door: `VitalsProcessor.process(reading)`. It is safe against messy device data: a redelivered reading is recognised as a duplicate and changes nothing, a late reading never overwrites newer data, and readings for unknown patients or with impossible times are ignored. Accepted readings are stored as history (for trend scoring later), scored, and applied to the patient's case; the dispatch loop then sends units.
+Incoming readings have a single front door: `VitalsProcessor.process(reading)`. It is safe against messy device data: a redelivered reading is recognised as a duplicate and changes nothing, a late reading never overwrites newer data, and readings for unknown patients or with impossible times are ignored. Accepted readings are stored (the in-memory store keeps only the latest per patient; a database will keep the history for trend scoring), scored, and applied to the patient's case; the dispatch loop then sends units.
 
 A console simulator (`dispatch-sim`) runs the whole engine end to end on a fake city: 50 patients with wearables (some deteriorate over ten minutes), 18 units that drive to them, and units that misbehave on purpose (never answer, break down halfway, lose signal halfway). It talks to the engine only through its public entry points and learns what happened only from the engine's events, the way a crew's app would. Two simulated hours run in about 0.2 seconds and end with a report of wait and response times per band, timeouts, failures, preemptions, reassignments and first responders. Runs are repeatable: the same seed builds the same city.
 
 The simulator has already found, and helped fix, a real gap that 486 unit tests could not: a patient who deteriorates gradually first crosses into MEDIUM and gets a nurse, but nothing upgraded the response when they turned CRITICAL a minute later. Now the engine re-checks the response whenever a patient gets worse while help is on the way: if the unit coming is no longer enough, it stays on as a first responder and a proper ambulance is sent. In a typical run six responses are upgraded, and the nurse who was already on the way reaches the patient minutes before the ambulance.
 
-A JavaFX window (`dispatch-sim-fx`) shows the same simulation live: a map of the city with patients coloured by how ill they are, ambulances, nurses and doctors driving to them along dashed lines, broken-down and silent units marked, and a side panel with the simulated clock, play/pause/step and speed controls (10x, 60x, 300x), live counters and a readable log of what the engine just did ("nurse-6 now first responder (p17 got worse)"). When the run ends, the report appears in the panel. The window only reads read-only snapshots of the simulation, so the engine and the simulator stay free of any UI code.
+Next to the planned two-hour run there is a **live, endless simulator** (`LiveSimulation`) that runs on threads in sped-up real time. A 40 x 40 km city with 200 patients and 68 units just lives: patients fall ill at random moments (about 8 an hour across the city, drawn as a Poisson process), units never answer, break down or lose signal at random, failed units are repaired after 20 minutes and come back into service, and it never ends. One **engine thread** owns the whole engine and is the only thread that ever touches it; patients and units run as repeating tasks on a small pool of **agent threads** and only send it messages (a reading, "answered", a position, "arrived", "back in service"). Every 25 ms the engine thread sends units, checks for silent and stuck ones, tells units about their trips, and publishes an immutable snapshot of the city for anyone to read. No locks are needed around the engine, because only one thread uses it (thread confinement).
+
+A JavaFX window (`dispatch-sim-fx`) shows the live city: a map with patients coloured by how ill they are (critical ones pulse), ambulances, nurses and doctors driving to them along dashed lines, broken-down, silent and offline units marked, and a side panel with a day-and-time clock, play/pause and speed controls (10x, 60x, 300x), live counters, a readable log of what the engine just did ("nurse-6 now first responder (p17 got worse)") and a Report button that swaps the log for the statistics so far. The map can be dragged, zoomed with the scroll wheel and reset with a double-click; clicking a unit or patient shows its details; a light and a dark theme are built in. The window never steps the simulation: every frame it just draws the newest snapshot. Closing it stops the threads.
 
 **In progress:** the Spring layer that turns the engine into a running service. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
@@ -232,6 +234,7 @@ A JavaFX window (`dispatch-sim-fx`) shows the same simulation live: a map of the
 - [x] Upgrade the response when a case gets worse (found by the simulator)
 - [ ] The other known gaps in [BACKLOG.md](BACKLOG.md)
 - [x] Simulator window (JavaFX): the city, patients and units moving live
+- [x] Live, endless simulator: random illnesses and failures, repaired units back in service, one engine thread plus agent threads
 - [ ] Scorer comparison in the simulator (once a second scorer exists)
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
@@ -257,7 +260,7 @@ cd medidispatch
 mvn test
 ```
 
-The engine is a library, so there is no server to start yet. The quickest way to see it work is the simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+The engine is a library, so there is no server to start yet. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -312,13 +315,15 @@ medidispatch/
     src/test/java/...         unit, concurrency and scenario tests
   dispatch-sim/               console simulator: a fake city running on the real engine
     src/main/java/com/medidispatch/sim/
-                              Simulation (wires the engine and runs the loop), SimulatedPatient, SimulatedUnit,
-                              SimulationConfig, MetricsCollector, SimulationReport, WorldSnapshot, EventLog,
-                              SimulatorMain
+                              EngineParts (wires the engine), Simulation (planned two-hour run, step by step),
+                              LiveSimulation, LiveEngine, LivePatient, LiveUnit, LiveConfig, ScaledClock (live,
+                              endless, threaded), SimulatedPatient, SimulatedUnit, SimulationConfig, CityMap,
+                              MetricsCollector, SimulationReport, WorldSnapshot, EventLog, SimulatorMain
   dispatch-sim-fx/            JavaFX window for the simulator
     src/main/java/com/medidispatch/sim/fx/
                               SimulatorLauncher (run this), SimulatorApp (window and animation loop), MapView (canvas
-                              map), SidePanel (controls, counters, log), MapProjection, TickPacer
+                              map), SidePanel (controls, counters, log, report), MapProjection, Viewport (pan and
+                              zoom), Selection (details of a clicked dot), Theme (light and dark)
     src/main/resources/...    simulator.css
   BACKLOG.md                  known gaps to tackle later
   (planned)
@@ -339,7 +344,8 @@ Every component is covered by tests, including:
 - time-based tests driven by a controllable clock, so "the unit stayed silent for 60 seconds" runs instantly, including the recovery scenario where the nearest ambulance goes silent and the next one is sent.
 
 - end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own,
-- window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale) and the frame pacer (exact speed, leftover time carried between frames, long freezes capped).
+- live simulator tests that run the real threads at 300x for a few seconds: cases are served, no unit times out or fails when none misbehaves, no job on the engine thread throws, failed units go offline and come back, pausing freezes time and `stop()` ends every thread; the sped-up clock is tested with a fake time source,
+- window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes.
 
 Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
 

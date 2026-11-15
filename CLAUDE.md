@@ -32,13 +32,17 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (565 tests: 503 in dispatch-core, 50 in dispatch-sim, 12 in dispatch-sim-fx)
+## Built so far (591 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
 AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
 VitalsRepository (save, latestFor(patientId) = newest by timeStamp), EventPublisher.
+In-memory adapters are built for endless runs: InMemoryVitalsRepository keeps ONLY the latest reading per patient
+(the port only asks for that); InMemoryCaseRepository indexes patient -> open case id (checked against the live Case
+on lookup); InMemoryEventPublisher has publishedSince(from) and size() so readers keep a bookmark instead of
+re-reading the whole list. UnitTracker.onBackInService(unitId): OFFLINE -> AVAILABLE (ISE if not OFFLINE).
 Events (package event): CaseStatusChanged, CaseBandChanged, UnitAssigned (carries the role), AssignmentStatusChanged,
 AssignmentRoleChanged (PRIMARY -> SUPPORT on an upgrade).
 Engine: VitalsProcessor + ProcessingResult, ResponseUpgrader, Dispatcher, CaseManager (incl. onAssignmentLost),
@@ -196,18 +200,58 @@ dispatch-sim side: Simulation.snapshot() -> WorldSnapshot (public record: time, 
 Optional band of open case), UnitView(id, type, position, UnitState, Optional target, Optional role), waitingCases,
 recentEvents (EventLog: readable lines, newest first, last 20, routine events left out), report, finished).
 UnitState: FREE, ANSWERING, DRIVING, ON_SCENE, BROKEN_DOWN, NO_SIGNAL, OFFLINE (engine OFFLINE wins).
-fx side: SimulatorLauncher (plain main -> Application.launch; run THIS, not SimulatorApp), SimulatorApp (BorderPane:
-MapView centre, SidePanel right; AnimationTimer on the JavaFX thread: TickPacer.ticksFor(elapsed) -> step() x n ->
-snapshot -> draw/update; no other threads), MapView (Canvas 640x640, layers: background+2 km grid, dashed trip lines,
-patients by band colour, units by type shape, legend), SidePanel (VBox: clock, Play/Pause, Step, speed ToggleGroup
-10/60/300x, counters GridPane, event log ListView, report TextArea when finished; buttons call callbacks set by the
-app), MapProjection and TickPacer (pure logic, unit-tested; "humble object"), simulator.css in resources.
+fx side (now shows the LIVE simulation): SimulatorLauncher (plain main -> Application.launch; run THIS, not
+SimulatorApp), SimulatorApp (BorderPane: MapView centre, SidePanel in a ScrollPane right, dark theme by default;
+new LiveSimulation(LiveConfig.bigCity()).start(); AnimationTimer on the JavaFX thread only reads latestSnapshot() and
+redraws when it is a new object, never steps; Application.stop() -> live.stop()), MapView (resizable Pane + Canvas:
+drag to pan, scroll to zoom 1-8x, double-click resets, click selects, critical patients pulse; layers: grid, dashed
+trip lines, patients by band colour, units by type shape, selection ring, legend), SidePanel(initialSpeed, start)
+(clock "Day N HH:mm:ss", Play/Pause, Report button swapping the event log and the live report TextArea, speed
+ToggleGroup 10/60/300x, Light/Dark + Reset view, Selected details, counters; buttons call callbacks set by the app).
+Pure logic, unit-tested ("humble object"): MapProjection, Viewport (zoom/pan maths), Selection (describe(snapshot,
+id)), Theme (LIGHT/DARK colours, cssClass, other()). simulator.css has .root.light / .root.dark. TickPacer was deleted
+(the window no longer steps a simulation).
 Harmless warnings when running: "Unsupported JavaFX configuration: unnamed module" (classpath mode) and native access /
 sun.misc.Unsafe warnings from inside JavaFX 21 (VM option --enable-native-access=ALL-UNNAMED hides one).
+
+## Live simulator (DONE, tested), dispatch-sim, package com.medidispatch.sim
+Endless, random, threaded; the step-by-step Simulation stays for tests and SimulatorMain (both wire the engine through
+EngineParts, the shared composition root: package-private final fields queue, cases, patients, resources, assignments,
+events, caseManager, assignmentManager, coordinator, unitTracker, timeoutMonitor, tripMonitor, processor; constants
+ack 60 s, signal 30 s, stall 120 s, maxAge 10 min). MetricsCollector is incremental: onReading(result), onEvent(e),
+report(simulatedDuration). CityMap has randomPoint(random, sizeKm) and bounds(sizeKm).
+- LiveConfig (public record): seed (layout only), citySizeKm, patientCount, als/bls/nurse/doctorCount,
+  illnessesPerHour, noAck/breakdown/signalLossChance, repairTime, startSpeed. bigCity() = 40 km, 200 patients,
+  16/24/20/8, 8 per hour, 0.05 each, 20 min, speed 60, random seed. searchRadiusKm() = max(20, 0.6 x size);
+  meanHoursBetweenIllnesses() = patients / illnessesPerHour.
+- ScaledClock (extends Clock, all synchronized): anchor (simulated, real nanos) + speed; pause/resume/setSpeed move
+  the anchor so time never jumps; LongSupplier realNanos injectable for tests.
+- LiveEngine: owns EngineParts on ONE daemon thread "engine" (single-thread ScheduledExecutorService) = thread
+  confinement, no locks on the engine. Jobs from other threads: reading, answered, position, arrived, backInService
+  (each = execute(job)); stale messages are ignored by checking the trip status first (answered only if ASSIGNED,
+  arrived only if EN_ROUTE). Tick every BEAT = 25 ms real: dispatchAll (+ onAssigned), finish crews 10 min on scene
+  (complete, onStabilised, close), both monitors, read new events with a bookmark (log + metrics + TripOrders to
+  units: UnitAssigned -> START(target, role), AssignmentRoleChanged -> ROLE, terminal AssignmentStatusChanged -> END
+  (final status)), publish an immutable WorldSnapshot in a volatile field (unit OFFLINE in the engine wins).
+  guarded(work) catches + counts + prints exceptions (a periodic task that throws is silently cancelled otherwise);
+  errors() must stay 0 in tests. Rejected jobs after stop are dropped.
+- LivePatient (Runnable, synchronized): exponential wait to the next illness (Poisson process), random peak 30/30/40%
+  MEDIUM/HIGH/CRITICAL (a SimulatedPatient episode), a reading every 60 simulated s (first ones spread over a minute);
+  treat() (called by the engine thread on PRIMARY arrival) -> healthy, next illness >= 2 h + exponential wait later.
+- LiveUnit (Runnable, synchronized): wraps SimulatedUnit; ConcurrentLinkedQueue<TripOrder> inbox; per-trip random
+  Behaviour; on END with TIMED_OUT/FAILED -> out of service for repairTime, then position + backInService; publishes a
+  volatile UnitView; nothing moves while the clock is paused (elapsed = 0).
+- LiveSimulation (public): MAX_SPEED 300, START 2026-01-05T08:00Z, 4 daemon "agents-N" threads; every patient and unit
+  is its own scheduleWithFixedDelay task (random first delay); constructor builds the city with the clock paused and
+  publishes a first snapshot; start() (once, else ISE), stop() (shutdownNow + await), pause, resume, setSpeed
+  (1..300), speed, paused, startTime, latestSnapshot. Package-private engine() and threadsStopped() for tests.
+- Tests: ScaledClockTest (fake nanos), LiveSimulationTest (real threads at 300x, waits up to 8 s per condition).
+Known limit: the in-memory event list grows forever (ponytail comment in LiveEngine; a few MB per simulated day).
+Speeds above 300x would make 25 ms beats too coarse for the 30 s signal timeout.
 
 ## Next steps after that
 1. The Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
    The user creates Maven modules themselves; give them step-by-step module instructions first.
-2. Remaining BACKLOG.md items (unit back in service, head-of-line blocking, ...) when there is time.
+2. Remaining BACKLOG.md items (head-of-line blocking, ETA, queue aging, ...) when there is time.
 3. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
-4. Possible window extras later: restart with a new seed, settings form, scorer comparison.
+4. Possible window extras later: restart with a new seed, settings form (city size, rates), scorer comparison.
