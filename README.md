@@ -105,10 +105,8 @@ MediDispatch uses **ports and adapters** (hexagonal architecture). The core cont
 ```mermaid
 flowchart TB
     subgraph Outside["Adapters (plug in from outside)"]
-        REST[REST API]
-        REDIS[Redis adapters<br/>queue, geo, claims]
-        PG[Postgres adapters<br/>patients, cases]
-        KAFKA[Kafka<br/>event publisher]
+        REST[REST API + SSE live feed<br/>dispatch-service]
+        PG[Postgres adapters<br/>PostGIS, TimescaleDB, outbox]
         MEM[In-memory adapters<br/>tests and simulator]
     end
     subgraph Core["dispatch-core (pure Java)"]
@@ -119,27 +117,34 @@ flowchart TB
     REST --> ENG
     ENG --> DOM
     ENG --> PORTS
-    REDIS -. implements .-> PORTS
     PG -. implements .-> PORTS
-    KAFKA -. implements .-> PORTS
     MEM -. implements .-> PORTS
 ```
 
-**Planned service layout**
+**A modular monolith.** The application is one Spring Boot service (`dispatch-service`) with one database, split into packages rather than separate services: one deploy, and real transactions across cases, trips and unit claims. It gets split into services only when there is a measured reason.
 
-| Service | Responsibility |
+```
+ patient phone, crew phone (PWA), control room and hospital (web)
+            | HTTPS commands                ^ SSE live feed
+            v                               |
+ +-------------------- dispatch-service (Spring Boot) --------------------+
+ | api          controllers, JSON records, error mapping, auth (OTP, JWT) |
+ | service      DispatchService: the single front door, the dispatch loop |
+ | live         server-sent events for live screens                       |
+ | persistence  Postgres / PostGIS / TimescaleDB adapters for the ports   |
+ | dispatch-core  the pure-Java engine, wired by EngineConfig             |
+ +-----------------------------------+------------------------------------+
+                                     v
+              Postgres + PostGIS + TimescaleDB (one server)
+```
+
+| Module | Responsibility |
 |---|---|
 | `dispatch-core` | The engine: domain model, scoring, dispatch logic, ports, in-memory adapters |
-| `dispatch-service` | Spring Boot wrapper: REST API, Redis and Postgres adapters, wiring |
-| `ingestion-service` | High-volume vitals intake, validation and cleaning |
-| `fleet-service` | Ambulances, nurses and couriers, their status and live location |
-| `hospital-service` | Capacity and departments, destination selection after pickup |
-| `tracking-service` | Live positions and ETAs over websockets |
-| `notification-service` | Alerts to dispatchers, patients, caregivers and responders |
-| `simulator` | Synthetic patients and moving units for demos and load tests |
-| `dashboard` | Live patient board and map |
-
-The earlier Spring Cloud work (API gateway, service discovery, central config) is reused for the platform layer.
+| `dispatch-service` | Spring Boot application: wiring, `DispatchService`, REST API, live feed, database adapters |
+| `dispatch-sim` | Synthetic patients and moving units: a planned two-hour run and an endless live city |
+| `dispatch-sim-fx` | JavaFX window showing the live simulated city |
+| web app (planned) | One React + TypeScript app with four faces: control room, crew, patient, hospital |
 
 ## Tech stack
 
@@ -148,12 +153,13 @@ The earlier Spring Cloud work (API gateway, service discovery, central config) i
 | Language | Java 21 |
 | Build | Maven (multi-module) |
 | Core | Plain Java, no framework |
-| Services | Spring Boot, Spring Cloud |
-| Storage | PostgreSQL (Flyway migrations), Redis (geo index, sorted sets, atomic claims) |
-| Messaging | Apache Kafka (event streaming, outbox pattern) |
-| Resilience and observability | Resilience4j, OpenTelemetry, Zipkin, Prometheus, Grafana |
-| Containers | Docker, Docker Compose, Kubernetes (with autoscaling) |
-| Testing | JUnit 5, Testcontainers, k6 or Gatling |
+| Service | Spring Boot 4.1 (Spring MVC, scheduling), one modular monolith |
+| Storage | PostgreSQL with PostGIS (nearest unit) and TimescaleDB (vitals history), Flyway migrations |
+| Live data | Server-sent events for live screens; an outbox table for events |
+| Frontend (planned) | React + TypeScript (Vite), installable as a PWA; MapLibre + OpenStreetMap |
+| Containers | Docker Compose |
+| Testing | JUnit 5, Spring Boot test, Testcontainers, MockMvc |
+| If time allows | Web Push, MQTT, Redis (only if measured), Kafka, Kubernetes, Prometheus and Grafana |
 
 ## Design principles
 
@@ -207,7 +213,22 @@ Next to the planned two-hour run there is a **live, endless simulator** (`LiveSi
 
 A JavaFX window (`dispatch-sim-fx`) shows the live city: a map with patients coloured by how ill they are (critical ones pulse), ambulances, nurses and doctors driving to them along dashed lines, broken-down, silent and offline units marked, and a side panel with a day-and-time clock, play/pause and speed controls (10x, 60x, 300x), live counters, a readable log of what the engine just did ("nurse-6 now first responder (p17 got worse)") and a Report button that swaps the log for the statistics so far. The map can be dragged, zoomed with the scroll wheel and reset with a double-click; clicking a unit or patient shows its details; a light and a dark theme are built in. The window never steps the simulation: every frame it just draws the newest snapshot. Closing it stops the threads.
 
-**In progress:** the Spring layer that turns the engine into a running service. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**In progress: the Spring Boot service (`dispatch-service`).** The application starts and builds the whole engine as Spring beans (`EngineConfig`), so the core itself stays free of Spring. It puts one front door in front of the engine, `DispatchService`; everything outside the engine (the coming REST API, live feed and simulator) goes through it. Through it you can:
+
+- register patients and units;
+- submit readings;
+- accept, arrive at and complete trips;
+- report positions;
+- put a unit back in service;
+- look up cases, trips and units.
+
+Answers are immutable snapshots (`CaseInfo`, `TripInfo`, `UnitInfo`), never live engine objects.
+
+A scheduled tick runs once a second. It sends units to waiting cases, then takes back trips whose crew never answered or whose unit went silent or stopped moving.
+
+Web requests arrive on many threads at once, so every method holds one shared lock. A test fires 50 patients at the service from 50 threads while the tick runs: exactly as many units are sent as exist, and none is sent twice. Unknown ids and illegal steps fail with different exceptions, so the API can answer 404 and 409.
+
+Next: the REST API, a live feed for screens, and Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -239,14 +260,16 @@ A JavaFX window (`dispatch-sim-fx`) shows the live city: a map with patients col
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
 **Application layer**
-- [ ] Spring Boot service: REST API, Postgres and Redis adapters, authentication and roles
-- [ ] Hospital selection and resilience (circuit breakers, retries)
-- [ ] Kafka: event streaming, outbox pattern, idempotent consumers, ingestion service
-- [ ] Tracking and notification services
-- [ ] Docker, Docker Compose, Kubernetes with autoscaling
-- [ ] Observability: metrics, tracing, dashboards
-- [ ] Load testing and bottleneck analysis
-- [ ] Live dashboard and demo
+- [x] Spring Boot service: the engine wired as beans, one front door (`DispatchService`), the scheduled dispatch loop
+- [ ] REST API with error mapping and idempotent requests
+- [ ] Live feed for screens (server-sent events)
+- [ ] Postgres + PostGIS + TimescaleDB adapters, Flyway, Testcontainers
+- [ ] Hospitals: registry, destination choice, pre-alert
+- [ ] The simulator driving the running service over HTTP
+- [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
+- [ ] OTP login, JWT and roles
+- [ ] Docker Compose for the whole stack
+- [ ] Weak-network testing; demo
 
 The full plan is in [PLAN.md](PLAN.md).
 
@@ -260,7 +283,7 @@ cd medidispatch
 mvn test
 ```
 
-The engine is a library, so there is no server to start yet. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+The service starts with `DispatchServiceApplication` in `dispatch-service`, but has no HTTP endpoints yet. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -325,10 +348,14 @@ medidispatch/
                               map), SidePanel (controls, counters, log, report), MapProjection, Viewport (pan and
                               zoom), Selection (details of a clicked dot), Theme (light and dark)
     src/main/resources/...    simulator.css
+  dispatch-service/           Spring Boot application around the engine
+    src/main/java/com/medidispatch/service/
+                              DispatchServiceApplication, EngineConfig (builds the engine as beans),
+                              DispatchService (the front door and dispatch loop), CaseInfo, TripInfo, UnitInfo,
+                              ReadingResult, NotFoundException
   BACKLOG.md                  known gaps to tackle later
   (planned)
-  dispatch-service/  ingestion-service/  fleet-service/  hospital-service/
-  tracking-service/  notification-service/  dashboard/  deploy/  docs/
+  web/                        React + TypeScript PWA (control room, crew, patient, hospital)
 ```
 
 ## Testing
@@ -345,9 +372,10 @@ Every component is covered by tests, including:
 
 - end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own,
 - live simulator tests that run the real threads at 300x for a few seconds: cases are served, no unit times out or fails when none misbehaves, no job on the engine thread throws, failed units go offline and come back, pausing freezes time and `stop()` ends every thread; the sped-up clock is tested with a fake time source,
-- window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes.
+- window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes,
+- service tests: Spring builds every engine part exactly once; a patient goes from first reading to closed case through `DispatchService`; and 50 threads hit the service while the dispatch loop runs, without a unit ever being sent twice.
 
-Planned: contract tests that run the same suite against the in-memory and the Redis adapters, Testcontainers integration tests, and simulator-driven load tests.
+Planned: contract tests that run the same suite against the in-memory and the Postgres adapters (Testcontainers), MockMvc tests for the REST API, and simulator-driven load tests.
 
 ## Safety, privacy and fairness
 

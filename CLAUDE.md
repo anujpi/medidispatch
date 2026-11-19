@@ -4,18 +4,23 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
 
 ## How to work with me
 - I'm learning Java and Spring (LLD, HLD, scalable systems) by building this. Act as a tutor.
-- Workflow for every step (when one section is done and we move to the next):
-  1. Talk about what we build next and why.
-  2. Spec: every class needed, its methods, and which package it goes in.
-  3. LLD lesson (principle, what goes wrong otherwise, a check-yourself question), plus **Decisions for me**.
-  4. STOP. When I ask for code, show it in chat with explanations so I can understand it first.
-  5. When I say so, Claude writes the files into the project, writes/updates the tests and runs the suite.
-  6. When all tests pass, I commit, then we go to the next step.
-  Never dump code or tests unprompted. Every main class gets Javadoc (class, constructors, public methods).
-- I type the code myself and run the tests, so explain every new Java feature (lambdas, switch, Optional, etc.)
-  in plain words. I'm not comfortable with `::` method references or streams yet, so prefer explicit lambdas
-  and plain loops.
-- When I ask for code or tests, show them in chat. Don't create or edit Java files in my project unless I ask.
+- Work in SMALL pieces (the pom, then one class or layer at a time), never a whole step's worth of files at once.
+- Two speeds (PLAN.md section 10 tags every item):
+  - (L) learn-deep, the default:
+    1. Talk about what we build next and why, with a concrete example.
+    2. Spec: every class needed, its methods, and which package it goes in.
+    3. LLD lesson (principle, what goes wrong otherwise, a check-yourself question), plus **Decisions for me**.
+    4. STOP. When I ask for code, show it in chat WITHOUT comments or Javadoc, then explain what it does.
+       Showing code means no tool use at all (no drafting files, no compiling).
+    5. When I say "write it", Claude writes the files WITH proper comments and Javadoc, writes/updates the tests
+       and runs the suite. "Go ahead" after a setup step is NOT "write it".
+    6. When all tests pass, I commit, then we go to the next piece.
+  - (F) fast, only for items tagged (F): say so in one line and wait for my ok, then Claude writes the files and
+    tests, runs them and walks me through them.
+- Every main class gets Javadoc (class, constructors, public methods; @Bean methods too).
+- Never commit; I commit. I create Maven modules myself (give me step-by-step module instructions).
+- Explain every new Java/Spring/React feature in plain words. I'm not comfortable with `::` method references or
+  streams yet, so use explicit lambdas and plain loops.
 - Review my code honestly: point out real bugs first, then style.
 
 ## Decisions
@@ -25,14 +30,19 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
 - Entities (Case, Resource, Patient) are classes with private state and guarded transitions; values are records.
 - Always `save()` an entity after changing it, even though the in-memory adapters don't force it.
 - Time comes in through a `java.time.Clock`, never `Instant.now()` inside engine code.
-- Deadline: December. Plan to build everything in PLAN.md.
+- Deadline: submission in the 2nd week of December 2026; feature work ends Dec 8. Build everything in PLAN.md,
+  ordered, nothing cut.
+- Application shape (details in PLAN.md section 2): modular monolith (one Spring Boot app, dispatch-service, split by
+  package); Postgres + PostGIS + TimescaleDB in one server; Redis only for a measured need; one React + TypeScript
+  (Vite) app with four faces (/control, /crew, /patient, /hospital) installable as a PWA; MapLibre + OSM; SSE for
+  live screens; OTP behind an OtpSender port, then JWT.
 
 - Events are published AFTER state is saved, collected and sent at the end of an operation. Never publish no-ops
   (same band / same status). The engine must not fail if publishing fails (EventPublisher must not throw);
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (591 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx)
+## Built so far (598 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 7 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -96,7 +106,12 @@ ResponseRecoveryTest.knownLimit... documents that recovery is two non-atomic ste
 Known gaps and small cleanups are all listed in BACKLOG.md (keep it up to date; add anything new the simulator finds).
 
 ## Running tests
-mvn is not on PATH for Claude. Claude can compile and run the whole suite with IntelliJ's bundled JDK
+mvn is not on PATH, but the Maven wrapper's download works offline (Spring Boot 4.1.1 is cached in ~/.m2):
+`export JAVA_HOME="/c/Program Files/JetBrains/IntelliJ IDEA 2026.2.0.1/jbr"`, then from C:/Projects/medidispatch run
+`~/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn -o -q test`
+(one module: `-pl dispatch-service -am`; one class: `-Dtest=X -Dsurefire.failIfNoSpecifiedTests=false`), then read
+`<module>/target/surefire-reports/*.xml`. The Mockito self-attach warning is harmless.
+Older way, still works for the non-Spring modules: compile and run the suite with IntelliJ's bundled JDK
 ("C:/Program Files/JetBrains/IntelliJ IDEA 2026.2.0.1/jbr/bin" javac/java) plus the JUnit 5.11.4 / platform 1.11.4
 jars from ~/.m2, building into its scratchpad (nothing written to the project). Classpaths need Windows paths (cygpath -w).
 Compile order: core main, core test, sim main (cp core main), sim test, fx main (cp core + sim main + JavaFX 21.0.5
@@ -249,9 +264,32 @@ report(simulatedDuration). CityMap has randomPoint(random, sizeKm) and bounds(si
 Known limit: the in-memory event list grows forever (ponytail comment in LiveEngine; a few MB per simulated day).
 Speeds above 300x would make 25 ms beats too coarse for the 30 s signal timeout.
 
-## Next steps after that
-1. The Spring layer (REST, Postgres, Redis, Kafka/outbox, Docker, Kubernetes, dashboard). Deadline December.
-   The user creates Maven modules themselves; give them step-by-step module instructions first.
-2. Remaining BACKLOG.md items (head-of-line blocking, ETA, queue aging, ...) when there is time.
-3. Real scoring (NEWS2, trend, baseline, context) can come after Spring works: RiskScorer makes it a drop-in swap.
-4. Possible window extras later: restart with a new seed, settings form (city size, rates), scorer comparison.
+## dispatch-service (IN PROGRESS), package com.medidispatch.service
+Maven module (parent medidispatch). pom: imports the spring-boot-dependencies 4.1.1 BOM in dependencyManagement
+(scope import, type pom) so our own parent stays the parent; deps dispatch-core, spring-boot-starter-webmvc,
+spring-boot-starter-webmvc-test (test); maven.compiler.parameters=true; spring-boot-maven-plugin with the version
+written out (plugins are not managed by the BOM) and the repackage goal.
+- DispatchServiceApplication: @SpringBootApplication + @EnableScheduling.
+- EngineConfig (@Configuration): the composition root. Package-private @Bean methods build every port (in-memory
+  adapters for now), policy (LadderResponseDecider, SimpleScorer) and engine part with `new`; Spring passes beans in
+  as parameters, each built once. Constants ACK_TIMEOUT 60 s, SIGNAL_TIMEOUT 30 s, STALL_TIMEOUT 120 s,
+  MAX_READING_AGE 10 min, SEARCH_RADIUS_KM 20. Swap the port beans here for the Postgres adapters.
+- DispatchService (@Service): the single front door; every public method is synchronized on it (one global lock,
+  reads included; ponytail comment: revisit with Postgres). registerPatient / registerUnit (ISE if the id exists),
+  submitReading -> ReadingResult(outcome, CaseInfo or null), acceptTrip (onEnRoute), reportPosition, arrive
+  (onArrived), completeTrip (complete; PRIMARY also onStabilised + close), backInService, findCase, openCaseOf,
+  findUnit, findTrip, activeTripOf. @Scheduled(fixedDelay = 1000) tick(): dispatchAll (dispatchNext until empty, then
+  caseManager.onAssigned), checkTimeouts, checkTrips. Unknown trip/unit ids -> NotFoundException (404 later); the
+  engine's ISE means a wrong state (409 later).
+- Records CaseInfo, TripInfo (engine "assignment"/"resource" become "trip"/"unit" outside the engine), UnitInfo
+  (lat/long flattened, lastSeenAt null if never), ReadingResult; built inside the lock with static from(...).
+- Tests: EngineConfigTest (@SpringBootTest: engine built, beans shared), DispatchServiceTest (own
+  AnnotationConfigApplicationContext(EngineConfig, DispatchService) per test, so no scheduling and tick() is called
+  by hand: full happy path, duplicate ids, unknown ids, arrive before accept, 50 threads + a ticking thread ->
+  exactly 10 units busy and 10 cases RESPONDING).
+
+## Next steps
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: REST controllers, request records and error mapping
+(404/400/409) (F, announce first), with the HTTP + idempotency lesson (L). Then SSE live feed (L), Postgres +
+PostGIS + TimescaleDB + Flyway, database adapters + Testcontainers, hospitals, the simulator over HTTP.
+BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
