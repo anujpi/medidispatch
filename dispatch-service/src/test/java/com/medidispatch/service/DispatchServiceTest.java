@@ -121,6 +121,45 @@ class DispatchServiceTest {
     }
 
     /**
+     * A weak network can deliver the same step twice (the response was lost, the phone retried). Every repeat must
+     * succeed and change nothing; in particular the case is closed once, not twice.
+     */
+    @Test
+    void aRepeatedStepIsHarmless() {
+        service.registerPatient("p1", HOME);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.submitReading(critical("p1"));
+        service.tick();
+        String tripId = service.activeTripOf("u1").orElseThrow().id();
+
+        service.acceptTrip(tripId);
+        assertEquals(AssignmentStatus.EN_ROUTE, service.acceptTrip(tripId).status());
+        service.arrive(tripId);
+        assertEquals(AssignmentStatus.ARRIVED, service.arrive(tripId).status());
+        String caseId = service.completeTrip(tripId).caseId();
+        assertEquals(AssignmentStatus.DONE, service.completeTrip(tripId).status());
+
+        assertEquals(CaseStatus.CLOSED, service.findCase(caseId).orElseThrow().status());
+    }
+
+    /** Only a repeat of the SAME step is forgiven: a late accept or arrive for a finished trip is still refused. */
+    @Test
+    void goingBackwardsIsStillRefused() {
+        service.registerPatient("p1", HOME);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.submitReading(critical("p1"));
+        service.tick();
+        String tripId = service.activeTripOf("u1").orElseThrow().id();
+
+        service.acceptTrip(tripId);
+        service.arrive(tripId);
+        service.completeTrip(tripId);
+
+        assertThrows(IllegalStateException.class, () -> service.acceptTrip(tripId));
+        assertThrows(IllegalStateException.class, () -> service.arrive(tripId));
+    }
+
+    /**
      * The lock under load: 50 threads send readings while another thread ticks. If two threads ever ran inside
      * the engine at once, a unit could be sent twice or a case lost. With 10 units for 50 critical patients,
      * exactly 10 units must be busy and exactly 10 cases RESPONDING.

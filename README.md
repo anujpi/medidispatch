@@ -213,7 +213,7 @@ Next to the planned two-hour run there is a **live, endless simulator** (`LiveSi
 
 A JavaFX window (`dispatch-sim-fx`) shows the live city: a map with patients coloured by how ill they are (critical ones pulse), ambulances, nurses and doctors driving to them along dashed lines, broken-down, silent and offline units marked, and a side panel with a day-and-time clock, play/pause and speed controls (10x, 60x, 300x), live counters, a readable log of what the engine just did ("nurse-6 now first responder (p17 got worse)") and a Report button that swaps the log for the statistics so far. The map can be dragged, zoomed with the scroll wheel and reset with a double-click; clicking a unit or patient shows its details; a light and a dark theme are built in. The window never steps the simulation: every frame it just draws the newest snapshot. Closing it stops the threads.
 
-**In progress: the Spring Boot service (`dispatch-service`).** The application starts and builds the whole engine as Spring beans (`EngineConfig`), so the core itself stays free of Spring. It puts one front door in front of the engine, `DispatchService`; everything outside the engine (the coming REST API, live feed and simulator) goes through it. Through it you can:
+**In progress: the Spring Boot service (`dispatch-service`).** The application starts and builds the whole engine as Spring beans (`EngineConfig`), so the core itself stays free of Spring. It puts one front door in front of the engine, `DispatchService`; everything outside the engine (the REST API, and later the live feed and simulator) goes through it. Through it you can:
 
 - register patients and units;
 - submit readings;
@@ -226,9 +226,25 @@ Answers are immutable snapshots (`CaseInfo`, `TripInfo`, `UnitInfo`), never live
 
 A scheduled tick runs once a second. It sends units to waiting cases, then takes back trips whose crew never answered or whose unit went silent or stopped moving.
 
-Web requests arrive on many threads at once, so every method holds one shared lock. A test fires 50 patients at the service from 50 threads while the tick runs: exactly as many units are sent as exist, and none is sent twice. Unknown ids and illegal steps fail with different exceptions, so the API can answer 404 and 409.
+Web requests arrive on many threads at once, so every method holds one shared lock. A test fires 50 patients at the service from 50 threads while the tick runs: exactly as many units are sent as exist, and none is sent twice.
 
-Next: the REST API, a live feed for screens, and Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**REST API.** Phones and screens use the engine over HTTP with JSON:
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/patients`, `POST /api/units` | register a patient or a unit (201) |
+| `POST /api/readings` | one vitals reading; always 200 with the outcome (`ACCEPTED`, `DUPLICATE`, `TOO_OLD`, ...) |
+| `GET /api/units/{id}/trip` | the crew app asks "do I have a job?" (200 with the trip, or 204) |
+| `PUT /api/units/{id}/position` | the crew phone reports where it is (204) |
+| `POST /api/trips/{id}/accept`, `/arrive`, `/complete` | the crew's steps on a trip |
+| `POST /api/units/{id}/back-in-service` | an offline unit is ready again |
+| `GET /api/cases/{id}`, `/api/patients/{id}/case`, `/api/units/{id}`, `/api/trips/{id}` | look things up |
+
+Errors use the standard problem format (RFC 9457) with codes that tell a client whether retrying can help: 400 for a bad body, 404 for an unknown id, 409 for a step that is not allowed now (arrive before accept, a duplicate id).
+
+The API is built for **weak mobile networks**. When a crew taps Accept in a tunnel, the server may do the work while the response is lost, so the phone retries. Every step is therefore safe to repeat: accepting, arriving or completing twice answers 200 and changes nothing, and a resent reading is recognised as a duplicate. Only a step that really is out of order is refused, such as a late "accept" for a trip that has already been taken away.
+
+Next: a live feed for screens, and Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -261,7 +277,7 @@ Next: the REST API, a live feed for screens, and Postgres. Other known gaps are 
 
 **Application layer**
 - [x] Spring Boot service: the engine wired as beans, one front door (`DispatchService`), the scheduled dispatch loop
-- [ ] REST API with error mapping and idempotent requests
+- [x] REST API with error mapping and idempotent requests
 - [ ] Live feed for screens (server-sent events)
 - [ ] Postgres + PostGIS + TimescaleDB adapters, Flyway, Testcontainers
 - [ ] Hospitals: registry, destination choice, pre-alert
@@ -283,7 +299,14 @@ cd medidispatch
 mvn test
 ```
 
-The service starts with `DispatchServiceApplication` in `dispatch-service`, but has no HTTP endpoints yet. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+The service starts with `DispatchServiceApplication` in `dispatch-service` and listens on port 8080, for example:
+
+```bash
+curl -X POST localhost:8080/api/units -H "Content-Type: application/json" \
+     -d '{"id":"u1","type":"NURSE","position":{"latitude":28.62,"longitude":77.21}}'
+```
+
+It keeps everything in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -353,6 +376,8 @@ medidispatch/
                               DispatchServiceApplication, EngineConfig (builds the engine as beans),
                               DispatchService (the front door and dispatch loop), CaseInfo, TripInfo, UnitInfo,
                               ReadingResult, NotFoundException
+      api/                    PatientController, UnitController, TripController, request records
+                              (PatientRequest, UnitRequest, Coordinates), ApiErrors (exceptions to status codes)
   BACKLOG.md                  known gaps to tackle later
   (planned)
   web/                        React + TypeScript PWA (control room, crew, patient, hospital)
@@ -373,9 +398,10 @@ Every component is covered by tests, including:
 - end-to-end simulator tests: whole two-hour runs where every unit sent arrives, and runs with 20% of each failure where the engine times out, fails and replaces units on its own,
 - live simulator tests that run the real threads at 300x for a few seconds: cases are served, no unit times out or fails when none misbehaves, no job on the engine thread throws, failed units go offline and come back, pausing freezes time and `stop()` ends every thread; the sped-up clock is tested with a fake time source,
 - window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes,
-- service tests: Spring builds every engine part exactly once; a patient goes from first reading to closed case through `DispatchService`; and 50 threads hit the service while the dispatch loop runs, without a unit ever being sent twice.
+- service tests: Spring builds every engine part exactly once; a patient goes from first reading to closed case through `DispatchService`; and 50 threads hit the service while the dispatch loop runs, without a unit ever being sent twice,
+- API tests over HTTP (MockMvc): the whole story from registration to closed case, a step out of order is 409 and a repeated step is 200, a resent reading is a duplicate, and every unknown id is 404 and every broken or impossible body is 400.
 
-Planned: contract tests that run the same suite against the in-memory and the Postgres adapters (Testcontainers), MockMvc tests for the REST API, and simulator-driven load tests.
+Planned: contract tests that run the same suite against the in-memory and the Postgres adapters (Testcontainers), and simulator-driven load tests.
 
 ## Safety, privacy and fairness
 

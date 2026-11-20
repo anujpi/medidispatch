@@ -2,6 +2,7 @@ package com.medidispatch.service;
 
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
+import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.Resource;
@@ -136,13 +137,21 @@ public class DispatchService {
     /**
      * The crew accepted the trip and is on the way: ASSIGNED to EN_ROUTE.
      *
+     * <p>Safe to repeat: if the trip is already EN_ROUTE, this is a retry of an accept that worked (its response
+     * was lost on a weak network), so the trip is returned unchanged instead of failing.
+     *
      * @param tripId the trip
      * @return the updated trip
      * @throws NotFoundException     if there is no such trip
-     * @throws IllegalStateException if the trip is not ASSIGNED
+     * @throws IllegalStateException if the trip is neither ASSIGNED nor already EN_ROUTE
      */
     public synchronized TripInfo acceptTrip(String tripId) {
-        requireTrip(tripId);
+        Assignment trip = requireTrip(tripId);
+        // Only the exact target state counts as "already done". Anything else (DONE, CANCELLED, TIMED_OUT...)
+        // goes to the engine, which refuses it.
+        if (trip.status() == AssignmentStatus.EN_ROUTE) {
+            return TripInfo.from(trip);
+        }
         return TripInfo.from(assignmentManager.onEnRoute(tripId));
     }
 
@@ -162,13 +171,18 @@ public class DispatchService {
      * The crew reached the patient: EN_ROUTE to ARRIVED. If this is the main (PRIMARY) unit, any support units
      * still on the way are stood down by the engine.
      *
+     * <p>Safe to repeat: if the trip is already ARRIVED, it is returned unchanged.
+     *
      * @param tripId the trip
      * @return the updated trip
      * @throws NotFoundException     if there is no such trip
-     * @throws IllegalStateException if the trip is not EN_ROUTE
+     * @throws IllegalStateException if the trip is neither EN_ROUTE nor already ARRIVED
      */
     public synchronized TripInfo arrive(String tripId) {
-        requireTrip(tripId);
+        Assignment trip = requireTrip(tripId);
+        if (trip.status() == AssignmentStatus.ARRIVED) {
+            return TripInfo.from(trip);
+        }
         return TripInfo.from(assignmentManager.onArrived(tripId));
     }
 
@@ -176,20 +190,26 @@ public class DispatchService {
      * The crew finished on scene: the trip becomes DONE and the unit is free again. When the main (PRIMARY) unit
      * finishes, the patient is treated as stabilised and the case is closed.
      *
+     * <p>Safe to repeat: if the trip is already DONE, it is returned unchanged and the case is not touched again.
+     *
      * @param tripId the trip
      * @return the updated trip
      * @throws NotFoundException     if there is no such trip
      * @throws IllegalStateException if the trip cannot be completed from its current status
      */
     public synchronized TripInfo completeTrip(String tripId) {
-        requireTrip(tripId);
-        Assignment trip = assignmentManager.complete(tripId);
-        // A support unit leaving does not end the case; only the main unit finishing does.
-        if (trip.role() == AssignmentRole.PRIMARY) {
-            caseManager.onStabilised(trip.caseId());
-            caseManager.close(trip.caseId());
+        Assignment trip = requireTrip(tripId);
+        // Returning here matters: running on would close an already closed case and throw.
+        if (trip.status() == AssignmentStatus.DONE) {
+            return TripInfo.from(trip);
         }
-        return TripInfo.from(trip);
+        Assignment done = assignmentManager.complete(tripId);
+        // A support unit leaving does not end the case; only the main unit finishing does.
+        if (done.role() == AssignmentRole.PRIMARY) {
+            caseManager.onStabilised(done.caseId());
+            caseManager.close(done.caseId());
+        }
+        return TripInfo.from(done);
     }
 
     /**
@@ -289,17 +309,20 @@ public class DispatchService {
     }
 
     /**
-     * Fails early with {@link NotFoundException} for an unknown trip. The engine would throw
+     * Looks up a trip, failing early with {@link NotFoundException} if it is unknown. The engine would throw
      * {@link IllegalStateException}, which the web layer reports as "409 conflict"; a missing trip should be
      * "404 not found".
      *
      * @param tripId the trip that must exist
-     * @throws NotFoundException if it does not
+     * @return the trip, so callers can check its status without a second lookup
+     * @throws NotFoundException if it does not exist
      */
-    private void requireTrip(String tripId) {
-        if (assignments.findById(tripId).isEmpty()) {
+    private Assignment requireTrip(String tripId) {
+        Optional<Assignment> trip = assignments.findById(tripId);
+        if (trip.isEmpty()) {
             throw new NotFoundException("Trip " + tripId + " not found");
         }
+        return trip.get();
     }
 
     /**

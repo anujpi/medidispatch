@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (598 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 7 in dispatch-service)
+## Built so far (606 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 15 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -279,17 +279,44 @@ written out (plugins are not managed by the BOM) and the repackage goal.
   submitReading -> ReadingResult(outcome, CaseInfo or null), acceptTrip (onEnRoute), reportPosition, arrive
   (onArrived), completeTrip (complete; PRIMARY also onStabilised + close), backInService, findCase, openCaseOf,
   findUnit, findTrip, activeTripOf. @Scheduled(fixedDelay = 1000) tick(): dispatchAll (dispatchNext until empty, then
-  caseManager.onAssigned), checkTimeouts, checkTrips. Unknown trip/unit ids -> NotFoundException (404 later); the
-  engine's ISE means a wrong state (409 later).
+  caseManager.onAssigned), checkTimeouts, checkTrips. Unknown trip/unit ids -> NotFoundException (404); the
+  engine's ISE means a wrong state (409). requireTrip returns the Assignment.
+  Idempotent steps (weak networks): acceptTrip / arrive / completeTrip return the trip unchanged if it is ALREADY in
+  the target state (EN_ROUTE / ARRIVED / DONE); any other state goes to the engine, which refuses it (409). The engine
+  stays strict on purpose: leniency for retries lives at the front door. completeTrip must return early, or a repeat
+  would close the case twice.
 - Records CaseInfo, TripInfo (engine "assignment"/"resource" become "trip"/"unit" outside the engine), UnitInfo
   (lat/long flattened, lastSeenAt null if never), ReadingResult; built inside the lock with static from(...).
 - Tests: EngineConfigTest (@SpringBootTest: engine built, beans shared), DispatchServiceTest (own
   AnnotationConfigApplicationContext(EngineConfig, DispatchService) per test, so no scheduling and tick() is called
   by hand: full happy path, duplicate ids, unknown ids, arrive before accept, 50 threads + a ticking thread ->
-  exactly 10 units busy and 10 cases RESPONDING).
+  exactly 10 units busy and 10 cases RESPONDING, aRepeatedStepIsHarmless, goingBackwardsIsStillRefused).
+
+## dispatch-service REST API (DONE, tested), package com.medidispatch.service.api
+Controllers only translate HTTP <-> DispatchService calls; no logic. Decisions taken: repeated steps -> 200; readings
+always 200 with the outcome (DUPLICATE, TOO_OLD... are not errors, so devices don't retry); unit without a trip -> 204.
+- PatientController (/api): POST /patients (201; body PatientRequest), GET /patients/{id}/case, POST /readings (body is
+  the domain VitalsReading record itself; 200 + ReadingResult), GET /cases/{id}.
+- UnitController (/api/units): POST (201 + UnitInfo; body UnitRequest), GET /{id}, GET /{id}/trip (200 or 204; 404 for
+  an unknown unit), PUT /{id}/position (204; body Coordinates; PUT = idempotent by design), POST /{id}/back-in-service.
+- TripController (/api/trips): GET /{id}, POST /{id}/accept, /arrive, /complete (action URLs, not "set the status").
+- Request records: Coordinates(Double latitude, Double longitude) + toLocation() (NOT Location as a body: missing
+  double fields silently become 0.0; boxed Double + null check refuses them), PatientRequest(id, Coordinates home),
+  UnitRequest(id, ResourceType type, Coordinates position). Compact constructors refuse a missing position; blank ids
+  and missing types are refused by the engine's own constructors.
+- ApiErrors (@RestControllerAdvice, returns Spring's ProblemDetail, RFC 9457): NotFoundException 404,
+  IllegalStateException 409 (ponytail: a real bug throwing ISE would show as 409), IllegalArgumentException 400,
+  HttpMessageNotReadableException 400 (detail = getMostSpecificCause().getMessage(); covers broken JSON, unknown enum
+  values and record constructors that throw while Jackson reads the body).
+- Lookups in controllers use .orElseThrow(() -> new NotFoundException(...)) so every 404 has a ProblemDetail body.
+- ApiTest (@SpringBootTest + @AutoConfigureMockMvc from org.springframework.boot.webmvc.test.autoconfigure; MockMvc,
+  com.jayway.jsonpath.JsonPath to read ids out of answers). All tests share one context and the real scheduled tick
+  runs, so every test uses its own ids, and the only dispatching test works in Mumbai (far outside the 20 km radius of
+  the Delhi tests) so tests cannot steal each other's units. Tests call service.tick() instead of waiting.
+- Skipped: Location header on 201; Idempotency-Key store (add for SOS if one open case per patient is not enough).
+- Spring Boot 4 notes: Jackson 3 (package tools.jackson), Instants are ISO strings in JSON.
 
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: REST controllers, request records and error mapping
-(404/400/409) (F, announce first), with the HTTP + idempotency lesson (L). Then SSE live feed (L), Postgres +
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: the SSE live feed for screens (L). Then Postgres +
 PostGIS + TimescaleDB + Flyway, database adapters + Testcontainers, hospitals, the simulator over HTTP.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
