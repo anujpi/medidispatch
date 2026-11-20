@@ -160,6 +160,32 @@ class DispatchServiceTest {
     }
 
     /**
+     * The snapshot for live screens holds every unit (sorted by id), the open case with the patient's position,
+     * and the trip under way. Both units stand at the same spot, so the nurse is not strictly closer than the
+     * ambulance and no first responder is sent: exactly one trip.
+     */
+    @Test
+    void aSnapshotShowsTheFleetTheOpenCasesAndTheTrips() {
+        service.registerPatient("p1", HOME);
+        service.registerUnit("u2", ResourceType.NURSE, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.submitReading(critical("p1"));
+        service.tick();
+
+        LiveSnapshot snapshot = service.snapshot();
+
+        assertEquals(2, snapshot.units().size());
+        assertEquals("u1", snapshot.units().get(0).id());
+        assertEquals(1, snapshot.openCases().size());
+        CaseInfo openCase = snapshot.openCases().get(0);
+        assertEquals(CaseStatus.RESPONDING, openCase.status());
+        assertEquals(HOME.latitude(), openCase.latitude());
+        assertEquals(HOME.longitude(), openCase.longitude());
+        assertEquals(1, snapshot.activeTrips().size());
+        assertEquals("u1", snapshot.activeTrips().get(0).unitId());
+    }
+
+    /**
      * The lock under load: 50 threads send readings while another thread ticks. If two threads ever ran inside
      * the engine at once, a unit could be sent twice or a case lost. With 10 units for 50 critical patients,
      * exactly 10 units must be busy and exactly 10 cases RESPONDING.

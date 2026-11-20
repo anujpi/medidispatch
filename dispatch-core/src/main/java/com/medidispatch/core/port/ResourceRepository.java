@@ -55,4 +55,12 @@ public interface ResourceRepository {
      * @throws IllegalArgumentException if an argument is missing or the radius is not positive
      */
     List<Resource> findAssignedNear(Location center,double radiusKm,Set<ResourceType> types);
+
+    /**
+     * Lists every unit, whatever its status; used by screens that show the whole fleet. A database adapter answers
+     * it with one query.
+     *
+     * @return all units, sorted by id so the order is the same every time; a new list the caller may keep
+     */
+    List<Resource> findAll();
 }

@@ -6,6 +6,8 @@ import com.medidispatch.core.domain.RiskBand;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -108,5 +110,32 @@ public class InMemoryCaseRepositoryTest {
         assertThrows(IllegalArgumentException.class, () -> repo.save(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findById(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findOpenByPatientId(null));
+    }
+
+    // ---------- findOpen ----------
+
+    @Test
+    void findOpenReturnsOnlyOpenCasesOldestFirst() {
+        repo.save(new Case("late", "p1", RiskBand.HIGH, OPENED.plusSeconds(60)));
+        repo.save(new Case("early", "p2", RiskBand.LOW, OPENED));
+        Case done = newCase("done", "p3");
+        close(done);
+        repo.save(done);
+
+        List<String> ids = new ArrayList<>();
+        for (Case c : repo.findOpen()) {
+            ids.add(c.id());
+        }
+        assertEquals(List.of("early", "late"), ids);
+    }
+
+    /** The same Case object was closed after it was saved, without saving again: it must not be listed. */
+    @Test
+    void aCaseClosedAfterSavingDropsOutOfFindOpen() {
+        Case c = newCase("c1", "p1");
+        repo.save(c);
+        close(c);
+
+        assertTrue(repo.findOpen().isEmpty());
     }
 }

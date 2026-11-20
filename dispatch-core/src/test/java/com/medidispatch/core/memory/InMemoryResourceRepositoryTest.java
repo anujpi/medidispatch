@@ -221,4 +221,21 @@ public class InMemoryResourceRepositoryTest {
         assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(ORIGIN, 0, nurse));
         assertThrows(IllegalArgumentException.class, () -> repo.findAssignedNear(ORIGIN, -1, nurse));
     }
+
+    // ---------- findAll ----------
+
+    @Test
+    void findAllReturnsEveryUnitWhateverItsStatusSortedById() {
+        resource("b", ResourceType.AMBULANCE_ALS, NEAR);
+        Resource busy = resource("a", ResourceType.NURSE, FAR);
+        busy.transitionTo(ResourceStatus.ASSIGNED);
+        repo.save(busy);
+
+        assertEquals(List.of("a", "b"), ids(repo.findAll()));
+    }
+
+    @Test
+    void findAllOnAnEmptyRepositoryIsEmpty() {
+        assertTrue(repo.findAll().isEmpty());
+    }
 }

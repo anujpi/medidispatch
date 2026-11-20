@@ -3,6 +3,7 @@ package com.medidispatch.service;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.Resource;
@@ -23,6 +24,9 @@ import com.medidispatch.core.port.ResourceRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -54,6 +58,7 @@ public class DispatchService {
     private final DispatchCoordinator coordinator;
     private final TimeoutMonitor timeoutMonitor;
     private final TripMonitor tripMonitor;
+    private final Clock clock;
 
     /**
      * Spring calls this constructor and passes in the engine parts built by {@link EngineConfig}.
@@ -69,11 +74,13 @@ public class DispatchService {
      * @param coordinator       sends units to waiting cases
      * @param timeoutMonitor    finds crews that never acknowledged a trip
      * @param tripMonitor       finds trips whose unit went silent or stopped moving
+     * @param clock             the engine's clock, used to timestamp snapshots
      */
     public DispatchService(PatientRepository patients, ResourceRepository resources, CaseRepository cases,
                            AssignmentRepository assignments, VitalsProcessor processor, CaseManager caseManager,
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
-                           DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor) {
+                           DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
+                           Clock clock) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -85,6 +92,7 @@ public class DispatchService {
         this.coordinator = coordinator;
         this.timeoutMonitor = timeoutMonitor;
         this.tripMonitor = tripMonitor;
+        this.clock = clock;
     }
 
     /**
@@ -130,7 +138,7 @@ public class DispatchService {
     public synchronized ReadingResult submitReading(VitalsReading reading) {
         ProcessingResult result = processor.process(reading);
         // Optional.map runs the lambda only if a case is present; orElse(null) turns "no case" into null.
-        CaseInfo openCase = result.currentCase().map(c -> CaseInfo.from(c)).orElse(null);
+        CaseInfo openCase = result.currentCase().map(c -> caseInfo(c)).orElse(null);
         return new ReadingResult(result.outcome(), openCase);
     }
 
@@ -233,7 +241,7 @@ public class DispatchService {
      * @return the case, or empty if there is none with this id
      */
     public synchronized Optional<CaseInfo> findCase(String caseId) {
-        return cases.findById(caseId).map(c -> CaseInfo.from(c));
+        return cases.findById(caseId).map(c -> caseInfo(c));
     }
 
     /**
@@ -243,7 +251,32 @@ public class DispatchService {
      * @return the patient's open case, or empty if they have none
      */
     public synchronized Optional<CaseInfo> openCaseOf(String patientId) {
-        return cases.findOpenByPatientId(patientId).map(c -> CaseInfo.from(c));
+        return cases.findOpenByPatientId(patientId).map(c -> caseInfo(c));
+    }
+
+    /**
+     * Everything a live screen shows, at this moment: every unit, every open case, every trip under way.
+     *
+     * <p>Only copies state into immutable records, with no network I/O, so the lock is held for microseconds. The
+     * caller (the live feed) sends the result to screens AFTER the lock is released: a slow screen must never hold
+     * up dispatch.
+     *
+     * @return the frozen picture, safe to read from any thread
+     */
+    public synchronized LiveSnapshot snapshot() {
+        List<UnitInfo> units = new ArrayList<>();
+        for (Resource r : resources.findAll()) {
+            units.add(UnitInfo.from(r));
+        }
+        List<CaseInfo> openCases = new ArrayList<>();
+        for (Case c : cases.findOpen()) {
+            openCases.add(caseInfo(c));
+        }
+        List<TripInfo> trips = new ArrayList<>();
+        for (Assignment a : assignments.findActive()) {
+            trips.add(TripInfo.from(a));
+        }
+        return new LiveSnapshot(clock.instant(), units, openCases, trips);
     }
 
     /**
@@ -323,6 +356,19 @@ public class DispatchService {
             throw new NotFoundException("Trip " + tripId + " not found");
         }
         return trip.get();
+    }
+
+    /**
+     * Builds a {@link CaseInfo}, looking up the patient for the position. Every CaseInfo is made here, so none can
+     * be missing its position.
+     *
+     * @param c the engine's case
+     * @return the snapshot
+     */
+    private CaseInfo caseInfo(Case c) {
+        // Safe: a case only exists for a registered patient (VitalsProcessor rejects unknown patients first).
+        Patient patient = patients.findById(c.patientId()).orElseThrow();
+        return CaseInfo.from(c, patient);
     }
 
     /**

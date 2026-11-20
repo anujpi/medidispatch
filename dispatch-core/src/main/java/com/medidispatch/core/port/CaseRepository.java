@@ -2,6 +2,7 @@ package com.medidispatch.core.port;
 
 import com.medidispatch.core.domain.Case;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -31,4 +32,12 @@ public interface CaseRepository {
      * @return the open case, or empty if the patient has none
      */
     Optional<Case> findOpenByPatientId(String patientId);
+
+    /**
+     * Lists every case that is not closed or cancelled; used by screens that show the live situation. Open cases
+     * are always a small set, so a database adapter answers it cheaply with an index on the status.
+     *
+     * @return the open cases, oldest first (case id breaks ties); a new list the caller may keep
+     */
+    List<Case> findOpen();
 }

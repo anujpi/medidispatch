@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (606 tests: 506 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 15 in dispatch-service)
+## Built so far (612 tests: 510 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 17 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -67,6 +67,8 @@ support), LadderResponseDecider (placeholder ladder).
 All main classes have Javadoc (class, constructors, public methods; trivial accessors skipped). Keep it up to date
 when code changes, and document new classes the same way.
 Ports added: CaseQueue.peekNext(), ResourceRepository.findAssignedNear(center, radiusKm, types).
+For live screens: ResourceRepository.findAll() (sorted by id, a copy) and CaseRepository.findOpen() (oldest first,
+id breaks ties; the in-memory one walks the patient -> open case index, not every case, and re-checks isTerminal()).
 Resource also tracks lastSeenAt / lastMovedAt via reportLocation(where, at); movement means more than 20 m from the
 last counted position (movedFrom anchor), so GPS jitter is ignored and small steps add up.
 MutableClock (a Clock that only moves with advance(Duration)) lives in dispatch-core src/main/.../engine on purpose:
@@ -285,12 +287,18 @@ written out (plugins are not managed by the BOM) and the repackage goal.
   the target state (EN_ROUTE / ARRIVED / DONE); any other state goes to the engine, which refuses it (409). The engine
   stays strict on purpose: leniency for retries lives at the front door. completeTrip must return early, or a repeat
   would close the case twice.
-- Records CaseInfo, TripInfo (engine "assignment"/"resource" become "trip"/"unit" outside the engine), UnitInfo
-  (lat/long flattened, lastSeenAt null if never), ReadingResult; built inside the lock with static from(...).
+- Records CaseInfo (includes the patient's latitude/longitude: from(case, patient); every CaseInfo is built by the
+  private caseInfo(c) helper, which looks the patient up), TripInfo (engine "assignment"/"resource" become
+  "trip"/"unit" outside the engine), UnitInfo (lat/long flattened, lastSeenAt null if never), ReadingResult; built
+  inside the lock with static from(...).
+- snapshot(): synchronized, copies findAll units, findOpen cases and findActive trips into a LiveSnapshot(at, units,
+  openCases, activeTrips) (compact constructor takes List.copyOf, so it is truly immutable and safe to hand to the
+  feed thread). No I/O inside the lock. DispatchService now also takes the Clock (timestamps the snapshot).
 - Tests: EngineConfigTest (@SpringBootTest: engine built, beans shared), DispatchServiceTest (own
   AnnotationConfigApplicationContext(EngineConfig, DispatchService) per test, so no scheduling and tick() is called
   by hand: full happy path, duplicate ids, unknown ids, arrive before accept, 50 threads + a ticking thread ->
-  exactly 10 units busy and 10 cases RESPONDING, aRepeatedStepIsHarmless, goingBackwardsIsStillRefused).
+  exactly 10 units busy and 10 cases RESPONDING, aRepeatedStepIsHarmless, goingBackwardsIsStillRefused,
+  aSnapshotShowsTheFleetTheOpenCasesAndTheTrips).
 
 ## dispatch-service REST API (DONE, tested), package com.medidispatch.service.api
 Controllers only translate HTTP <-> DispatchService calls; no logic. Decisions taken: repeated steps -> 200; readings
@@ -316,7 +324,29 @@ always 200 with the outcome (DUPLICATE, TOO_OLD... are not errors, so devices do
 - Skipped: Location header on 201; Idempotency-Key store (add for SOS if one open case per patient is not enough).
 - Spring Boot 4 notes: Jackson 3 (package tools.jackson), Instants are ISO strings in JSON.
 
+## Live feed (DONE, tested), package com.medidispatch.service.live
+LiveFeed (@RestController): GET /api/live (text/event-stream) returns an SseEmitter (30 min timeout; EventSource
+reconnects by itself); onCompletion/onTimeout/onError remove it from a CopyOnWriteArrayList; the first snapshot is
+sent at once. @Scheduled(fixedDelay = 1000) broadcast(): nothing if no screens; service.snapshot() (lock held only
+while copying), THEN send "event:snapshot / data:{json}" to each screen; IOException or IllegalStateException -> drop
+that screen. Rule: never do network I/O while holding the DispatchService lock.
+Decisions: full snapshot every second (self-healing, no event ids/replay/heartbeats; ponytail: ~10 KB/s per screen,
+switch to deltas + snapshot on connect at hundreds of units on weak links); one feed for control room and hospital;
+crew phones keep polling GET /api/units/{id}/trip (Web Push later). ponytail: one send thread, a frozen screen delays
+everyone's update.
+- application.properties: spring.task.scheduling.pool.size=2 (default is ONE thread for all @Scheduled methods, so a
+  stuck send would delay the dispatch tick).
+- closeAll() listens for ContextClosedEvent and completes every emitter: Boot shuts down gracefully (waits up to 30 s
+  for requests in progress) and an SSE stream never ends, so without it every shutdown hung 30 s (surefire printed
+  "kill self fork JVM").
+- LiveFeedTest: RANDOM_PORT (real Tomcat), @LocalServerPort (org.springframework.boot.test.web.server), java.net.http
+  HttpClient with BodyHandlers.ofInputStream, reads lines as they arrive: "event:snapshot", "data:..." (Spring writes
+  no space after the colon); registers a unit and waits for it in a later message; @Timeout(10).
+- Watching it by hand on Windows: `curl.exe -N http://localhost:8080/api/live` (plain `curl` in Windows PowerShell is
+  Invoke-WebRequest, which waits for the response to end).
+
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: the SSE live feed for screens (L). Then Postgres +
-PostGIS + TimescaleDB + Flyway, database adapters + Testcontainers, hospitals, the simulator over HTTP.
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: Postgres + PostGIS + TimescaleDB in docker-compose and the
+Flyway schema (L for the schema, F for the rest). Then database adapters + Testcontainers, hospitals, the simulator
+over HTTP.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

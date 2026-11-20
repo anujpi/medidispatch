@@ -244,7 +244,9 @@ Errors use the standard problem format (RFC 9457) with codes that tell a client 
 
 The API is built for **weak mobile networks**. When a crew taps Accept in a tunnel, the server may do the work while the response is lost, so the phone retries. Every step is therefore safe to repeat: accepting, arriving or completing twice answers 200 and changes nothing, and a resent reading is recognised as a duplicate. Only a step that really is out of order is refused, such as a late "accept" for a trip that has already been taken away.
 
-Next: a live feed for screens, and Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**Live feed.** Screens open `GET /api/live`, a Server-Sent Events stream: one HTTP request whose response never ends, so the server can keep writing to it. A new connection gets the whole picture (every unit, every open case with its location, every trip under way) at once, then again every second. Sending the full picture instead of "what changed" makes the feed self-healing: a screen that missed a message on bad Wi-Fi is correct again a second later, and the browser's `EventSource` reconnects by itself. The picture is copied while holding the engine's lock, but sent only after the lock is released, on its own thread: a laptop whose connection freezes can delay its own updates, but never dispatch. Open streams are closed at shutdown so restarts do not hang.
+
+Next: Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -278,7 +280,7 @@ Next: a live feed for screens, and Postgres. Other known gaps are listed in [BAC
 **Application layer**
 - [x] Spring Boot service: the engine wired as beans, one front door (`DispatchService`), the scheduled dispatch loop
 - [x] REST API with error mapping and idempotent requests
-- [ ] Live feed for screens (server-sent events)
+- [x] Live feed for screens (server-sent events)
 - [ ] Postgres + PostGIS + TimescaleDB adapters, Flyway, Testcontainers
 - [ ] Hospitals: registry, destination choice, pre-alert
 - [ ] The simulator driving the running service over HTTP
@@ -304,6 +306,12 @@ The service starts with `DispatchServiceApplication` in `dispatch-service` and l
 ```bash
 curl -X POST localhost:8080/api/units -H "Content-Type: application/json" \
      -d '{"id":"u1","type":"NURSE","position":{"latitude":28.62,"longitude":77.21}}'
+```
+
+To watch the live feed, keep this running in a terminal (`-N` prints data as it arrives; on Windows type `curl.exe`, since `curl` in PowerShell is a different command):
+
+```bash
+curl -N localhost:8080/api/live
 ```
 
 It keeps everything in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
@@ -375,9 +383,10 @@ medidispatch/
     src/main/java/com/medidispatch/service/
                               DispatchServiceApplication, EngineConfig (builds the engine as beans),
                               DispatchService (the front door and dispatch loop), CaseInfo, TripInfo, UnitInfo,
-                              ReadingResult, NotFoundException
+                              ReadingResult, LiveSnapshot, NotFoundException
       api/                    PatientController, UnitController, TripController, request records
                               (PatientRequest, UnitRequest, Coordinates), ApiErrors (exceptions to status codes)
+      live/                   LiveFeed (server-sent events: the whole picture every second)
   BACKLOG.md                  known gaps to tackle later
   (planned)
   web/                        React + TypeScript PWA (control room, crew, patient, hospital)
@@ -399,7 +408,8 @@ Every component is covered by tests, including:
 - live simulator tests that run the real threads at 300x for a few seconds: cases are served, no unit times out or fails when none misbehaves, no job on the engine thread throws, failed units go offline and come back, pausing freezes time and `stop()` ends every thread; the sped-up clock is tested with a fake time source,
 - window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes,
 - service tests: Spring builds every engine part exactly once; a patient goes from first reading to closed case through `DispatchService`; and 50 threads hit the service while the dispatch loop runs, without a unit ever being sent twice,
-- API tests over HTTP (MockMvc): the whole story from registration to closed case, a step out of order is 409 and a repeated step is 200, a resent reading is a duplicate, and every unknown id is 404 and every broken or impossible body is 400.
+- API tests over HTTP (MockMvc): the whole story from registration to closed case, a step out of order is 409 and a repeated step is 200, a resent reading is a duplicate, and every unknown id is 404 and every broken or impossible body is 400,
+- a live-feed test over a real network connection: a real server on a random port and Java's HTTP client reading the stream line by line as it arrives, checking that the first picture comes at once and that a new unit shows up in a later message.
 
 Planned: contract tests that run the same suite against the in-memory and the Postgres adapters (Testcontainers), and simulator-driven load tests.
 

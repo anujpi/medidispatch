@@ -46,6 +46,14 @@ public class InMemoryResourceRepository implements ResourceRepository {
         return findNear(ResourceStatus.ASSIGNED,center,radiusKm,types);
     }
 
+    @Override
+    public List<Resource> findAll() {
+        // A copy, not the map's live view: callers cannot change our storage through it.
+        List<Resource> all = new ArrayList<>(byId.values());
+        all.sort((a, b) -> a.id().compareTo(b.id()));
+        return all;
+    }
+
     // shared by both searches: same rules, only the wanted status differs
     private List<Resource> findNear(ResourceStatus resourceStatus, Location center, double radiusKm, Set<ResourceType> types) {
         if (center == null) {
