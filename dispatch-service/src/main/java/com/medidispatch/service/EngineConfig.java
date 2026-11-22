@@ -2,6 +2,7 @@ package com.medidispatch.service;
 
 import com.medidispatch.core.engine.AssignmentManager;
 import com.medidispatch.core.engine.CaseManager;
+import com.medidispatch.core.engine.DestinationChooser;
 import com.medidispatch.core.engine.DispatchCoordinator;
 import com.medidispatch.core.engine.Dispatcher;
 import com.medidispatch.core.engine.Preemptor;
@@ -9,6 +10,7 @@ import com.medidispatch.core.engine.ResponseRecovery;
 import com.medidispatch.core.engine.ResponseUpgrader;
 import com.medidispatch.core.engine.SupportDispatcher;
 import com.medidispatch.core.engine.TimeoutMonitor;
+import com.medidispatch.core.engine.TransportCoordinator;
 import com.medidispatch.core.engine.TripMonitor;
 import com.medidispatch.core.engine.UnitTracker;
 import com.medidispatch.core.engine.VitalsProcessor;
@@ -17,6 +19,7 @@ import com.medidispatch.core.port.AssignmentRepository;
 import com.medidispatch.core.port.CaseQueue;
 import com.medidispatch.core.port.CaseRepository;
 import com.medidispatch.core.port.EventPublisher;
+import com.medidispatch.core.port.FacilityRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceClaimer;
 import com.medidispatch.core.port.ResourceRepository;
@@ -27,6 +30,7 @@ import com.medidispatch.core.scoring.RiskScorer;
 import com.medidispatch.core.scoring.SimpleScorer;
 import com.medidispatch.service.persistence.JdbcCaseQueue;
 import com.medidispatch.service.persistence.JdbcCaseRepository;
+import com.medidispatch.service.persistence.JdbcFacilityRepository;
 import com.medidispatch.service.persistence.JdbcPatientRepository;
 import com.medidispatch.service.persistence.JdbcResourceClaimer;
 import com.medidispatch.service.persistence.JdbcResourceRepository;
@@ -121,6 +125,15 @@ public class EngineConfig {
      * @param jdbc Boot's JdbcClient over the application's connection pool
      * @return where vitals readings are stored (every reading, in the TimescaleDB hypertable)
      */
+    /**
+     * @param jdbc Spring's fluent JDBC API, created by Boot
+     * @return the hospital and clinic registry on Postgres
+     */
+    @Bean
+    FacilityRepository facilityRepository(JdbcClient jdbc) {
+        return new JdbcFacilityRepository(jdbc);
+    }
+
     @Bean
     VitalsRepository vitalsRepository(JdbcClient jdbc) {
         return new JdbcVitalsRepository(jdbc);
@@ -285,6 +298,30 @@ public class EngineConfig {
      * @param clock     the shared clock
      * @return the part that records unit positions and puts units back in service
      */
+    /**
+     * @param facilities the hospital and clinic registry
+     * @return the destination rules: which hospital a patient is taken to
+     */
+    @Bean
+    DestinationChooser destinationChooser(FacilityRepository facilities) {
+        return new DestinationChooser(facilities);
+    }
+
+    /**
+     * @param assignments       where trips are stored
+     * @param resources         where units are stored
+     * @param chooser           picks the hospital
+     * @param assignmentManager moves the trip
+     * @param caseManager       moves the case
+     * @return the one call that starts a transport (scene to hospital)
+     */
+    @Bean
+    TransportCoordinator transportCoordinator(AssignmentRepository assignments, ResourceRepository resources,
+                                              DestinationChooser chooser, AssignmentManager assignmentManager,
+                                              CaseManager caseManager) {
+        return new TransportCoordinator(assignments, resources, chooser, assignmentManager, caseManager);
+    }
+
     @Bean
     UnitTracker unitTracker(ResourceRepository resources, Clock clock) {
         return new UnitTracker(resources, clock);

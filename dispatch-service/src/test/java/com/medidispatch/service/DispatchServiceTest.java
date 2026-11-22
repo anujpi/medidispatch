@@ -2,8 +2,11 @@ package com.medidispatch.service;
 
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Consciousness;
+import com.medidispatch.core.domain.Facility;
+import com.medidispatch.core.domain.FacilityKind;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
@@ -21,6 +24,7 @@ import org.springframework.context.annotation.Import;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,7 +66,7 @@ class DispatchServiceTest {
     @Test
     void aCriticalPatientIsServedFromReadingToClosedCase() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
 
         ReadingResult result = service.submitReading(critical("p1"));
         assertEquals(ProcessingResult.Outcome.ACCEPTED, result.outcome());
@@ -88,11 +92,11 @@ class DispatchServiceTest {
     @Test
     void anIdCanOnlyBeRegisteredOnce() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
 
         assertThrows(IllegalStateException.class, () -> service.registerPatient("p1", HOME));
         assertThrows(IllegalStateException.class,
-                () -> service.registerUnit("u1", ResourceType.AMBULANCE_BLS, NEARBY));
+                () -> service.registerUnit("u1", ResourceType.AMBULANCE_BLS, NEARBY, null));
     }
 
     /** Unknown ids give NotFoundException (later a 404), and reads give an empty Optional. */
@@ -113,7 +117,7 @@ class DispatchServiceTest {
     @Test
     void arrivingBeforeAcceptingIsRefused() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -128,7 +132,7 @@ class DispatchServiceTest {
     @Test
     void aRepeatedStepIsHarmless() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -147,7 +151,7 @@ class DispatchServiceTest {
     @Test
     void goingBackwardsIsStillRefused() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -168,8 +172,8 @@ class DispatchServiceTest {
     @Test
     void aSnapshotShowsTheFleetTheOpenCasesAndTheTrips() {
         service.registerPatient("p1", HOME);
-        service.registerUnit("u2", ResourceType.NURSE, NEARBY);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+        service.registerUnit("u2", ResourceType.NURSE, NEARBY, null);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
         service.submitReading(critical("p1"));
         service.tick();
 
@@ -197,7 +201,7 @@ class DispatchServiceTest {
             service.registerPatient("p" + i, HOME);
         }
         for (int i = 0; i < 10; i++) {
-            service.registerUnit("u" + i, ResourceType.AMBULANCE_ALS, NEARBY);
+            service.registerUnit("u" + i, ResourceType.AMBULANCE_ALS, NEARBY, null);
         }
 
         ExecutorService pool = Executors.newFixedThreadPool(51);
@@ -247,5 +251,147 @@ class DispatchServiceTest {
         }
         assertEquals(10, busyUnits);
         assertEquals(10, responding);
+    }
+
+    // ---- hospitals and clinics (H3b) ----
+
+    /** About {@code km} due north of HOME (0.009 degrees of latitude is about 1 km). */
+    private static Location kmNorth(double km) {
+        return new Location(HOME.latitude() + km * 0.009, HOME.longitude());
+    }
+
+    /** p1 at HOME, ambulance u1 sent to them, accepted and arrived; returns the trip id. */
+    private String arrivedTrip() {
+        service.registerPatient("p1", HOME);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.submitReading(critical("p1"));
+        service.tick();
+        String tripId = service.activeTripOf("u1").orElseThrow().id();
+        service.acceptTrip(tripId);
+        service.arrive(tripId);
+        return tripId;
+    }
+
+    @Test
+    void facilitiesAreRegisteredListedAndFound() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(Capability.STROKE), true));
+        service.registerFacility(Facility.clinic("c-lane", "Lane Clinic", kmNorth(1)));
+
+        List<String> ids = new ArrayList<>();
+        for (FacilityInfo f : service.facilities()) {
+            ids.add(f.id());
+        }
+        assertEquals(List.of("c-lane", "h-apollo"), ids);
+        FacilityInfo apollo = service.findFacility("h-apollo").orElseThrow();
+        assertEquals(FacilityKind.HOSPITAL, apollo.kind());
+        assertEquals(Set.of(Capability.STROKE), apollo.capabilities());
+        assertTrue(service.findFacility("nowhere").isEmpty());
+    }
+
+    /** Without the check, save() would silently replace the first facility. */
+    @Test
+    void aFacilityIdCanOnlyBeRegisteredOnce() {
+        service.registerFacility(Facility.hospital("h1", "First", kmNorth(2), Set.of(), true));
+
+        assertThrows(IllegalStateException.class,
+                () -> service.registerFacility(Facility.clinic("h1", "Second", kmNorth(3))));
+        assertEquals("First", service.findFacility("h1").orElseThrow().name());
+    }
+
+    /** Diversion on, the same again (harmless), then off; a clinic can never accept; unknown is not found. */
+    @Test
+    void diversionIsSwitchedOnAndOff() {
+        service.registerFacility(Facility.hospital("h1", "Apollo", kmNorth(2), Set.of(), true));
+        service.registerFacility(Facility.clinic("c1", "Lane Clinic", kmNorth(1)));
+
+        assertFalse(service.setAccepting("h1", false).accepting());
+        assertFalse(service.setAccepting("h1", false).accepting());
+        assertFalse(service.findFacility("h1").orElseThrow().accepting());
+        assertTrue(service.setAccepting("h1", true).accepting());
+
+        assertThrows(IllegalArgumentException.class, () -> service.setAccepting("c1", true));
+        assertThrows(NotFoundException.class, () -> service.setAccepting("nowhere", false));
+    }
+
+    /** A unit can belong to a facility that exists; an unknown base is refused and no unit is created. */
+    @Test
+    void aUnitsBaseMustExist() {
+        service.registerFacility(Facility.clinic("c1", "Lane Clinic", kmNorth(1)));
+
+        assertEquals("c1", service.registerUnit("n1", ResourceType.NURSE, NEARBY, "c1").baseId());
+        assertNull(service.registerUnit("n2", ResourceType.NURSE, NEARBY, null).baseId());
+        assertThrows(IllegalArgumentException.class,
+                () -> service.registerUnit("n3", ResourceType.NURSE, NEARBY, "nowhere"));
+        assertTrue(service.findUnit("n3").isEmpty());
+    }
+
+    /**
+     * Mrs. Sharma through the service: the nearer hospital has no stroke unit, so Apollo is chosen. After the
+     * handover the trip is done, the case closed and the ambulance free; the trip keeps its hospital and needs.
+     */
+    @Test
+    void aStrokePatientIsTakenToTheHospitalWithAStrokeUnitAndTheCaseCloses() {
+        service.registerFacility(Facility.hospital("h-general", "City General", kmNorth(3), Set.of(), true));
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(Capability.STROKE), true));
+        String tripId = arrivedTrip();
+        String caseId = service.findTrip(tripId).orElseThrow().caseId();
+
+        TripInfo moving = service.startTransport(tripId, Set.of(Capability.STROKE));
+
+        assertEquals(AssignmentStatus.TRANSPORTING, moving.status());
+        assertEquals("h-apollo", moving.hospitalId());
+        assertEquals(Set.of(Capability.STROKE), moving.needs());
+        assertEquals(CaseStatus.TRANSPORTING, service.findCase(caseId).orElseThrow().status());
+        assertEquals(ResourceStatus.ASSIGNED, service.findUnit("u1").orElseThrow().status());
+
+        TripInfo done = service.completeTrip(tripId);
+
+        assertEquals(AssignmentStatus.DONE, done.status());
+        assertEquals("h-apollo", done.hospitalId());
+        assertEquals(CaseStatus.CLOSED, service.findCase(caseId).orElseThrow().status());
+        assertEquals(ResourceStatus.AVAILABLE, service.findUnit("u1").orElseThrow().status());
+    }
+
+    /** A retry after a lost response: same trip back, the first hospital and needs stand. */
+    @Test
+    void aRepeatedTransportIsHarmless() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(Capability.STROKE), true));
+        String tripId = arrivedTrip();
+        service.startTransport(tripId, Set.of(Capability.STROKE));
+
+        TripInfo again = service.startTransport(tripId, Set.of(Capability.TRAUMA));
+
+        assertEquals(AssignmentStatus.TRANSPORTING, again.status());
+        assertEquals("h-apollo", again.hospitalId());
+        assertEquals(Set.of(Capability.STROKE), again.needs());
+    }
+
+    /** Nowhere to go: refused, and the trip and case are exactly as before (one transaction, rolled back). */
+    @Test
+    void withNoHospitalTheTransportIsRefusedAndNothingChanges() {
+        service.registerFacility(Facility.clinic("c1", "Lane Clinic", kmNorth(1)));
+        String tripId = arrivedTrip();
+        String caseId = service.findTrip(tripId).orElseThrow().caseId();
+
+        assertThrows(IllegalStateException.class, () -> service.startTransport(tripId, Set.of()));
+
+        TripInfo trip = service.findTrip(tripId).orElseThrow();
+        assertEquals(AssignmentStatus.ARRIVED, trip.status());
+        assertNull(trip.hospitalId());
+        assertEquals(CaseStatus.RESPONDING, service.findCase(caseId).orElseThrow().status());
+        assertThrows(NotFoundException.class, () -> service.startTransport("nope", Set.of()));
+    }
+
+    /** The live picture carries the hospitals and clinics too, with their diversion status. */
+    @Test
+    void theSnapshotShowsTheFacilities() {
+        service.registerFacility(Facility.hospital("h1", "Apollo", kmNorth(2), Set.of(), true));
+        service.setAccepting("h1", false);
+
+        List<FacilityInfo> shown = service.snapshot().facilities();
+
+        assertEquals(1, shown.size());
+        assertEquals("h1", shown.get(0).id());
+        assertFalse(shown.get(0).accepting());
     }
 }

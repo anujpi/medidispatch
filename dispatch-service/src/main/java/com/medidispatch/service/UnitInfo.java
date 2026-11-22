@@ -15,9 +15,10 @@ import java.time.Instant;
  * @param latitude   last known latitude
  * @param longitude  last known longitude
  * @param lastSeenAt when the unit last reported its position, or {@code null} if it never has
+ * @param baseId     the hospital or clinic the unit belongs to, or {@code null} if it has no base
  */
 public record UnitInfo(String id, ResourceType type, ResourceStatus status, double latitude, double longitude,
-                       Instant lastSeenAt) {
+                       Instant lastSeenAt, String baseId) {
 
     /**
      * Copies the fields out of a live engine resource. Call it while holding the {@link DispatchService} lock.
@@ -28,6 +29,6 @@ public record UnitInfo(String id, ResourceType type, ResourceStatus status, doub
     static UnitInfo from(Resource r) {
         // null rather than Optional: JSON has null, and records holding Optional are awkward to serialise.
         return new UnitInfo(r.id(), r.type(), r.status(), r.location().latitude(), r.location().longitude(),
-                r.lastSeenAt().orElse(null));
+                r.lastSeenAt().orElse(null), r.baseId().orElse(null));
     }
 }

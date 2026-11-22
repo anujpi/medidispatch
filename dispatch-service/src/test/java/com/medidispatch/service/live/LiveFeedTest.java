@@ -62,7 +62,7 @@ class LiveFeedTest {
             assertTrue(first.startsWith("data:"));
             assertFalse(first.contains("live-u1"));
 
-            service.registerUnit("live-u1", ResourceType.NURSE, new Location(28.62, 77.21));
+            service.registerUnit("live-u1", ResourceType.NURSE, new Location(28.62, 77.21), null);
 
             // Skip lines until a message mentions the new unit; it comes with the next broadcast.
             String line = stream.readLine();

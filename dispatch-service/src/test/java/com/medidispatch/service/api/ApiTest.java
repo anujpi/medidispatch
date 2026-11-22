@@ -54,6 +54,13 @@ class ApiTest {
                 """.formatted(id, type, latitude, longitude);
     }
 
+    private static String hospital(String id, double latitude, double longitude, String capabilities) {
+        return """
+                {"id": "%s", "name": "Hospital %s", "kind": "HOSPITAL",
+                 "position": {"latitude": %s, "longitude": %s}, "capabilities": %s}
+                """.formatted(id, id, latitude, longitude, capabilities);
+    }
+
     private static String reading(String patientId, Instant at, int heartRate, int spo2, String consciousness) {
         return """
                 {"patientId": "%s", "timeStamp": "%s", "heartRate": %d, "spo2": %d, "systolicBp": 120,
@@ -228,5 +235,123 @@ class ApiTest {
                 .andExpect(status().isBadRequest());
 
         http.perform(get("/api/units/bad-u1")).andExpect(status().isNotFound());
+    }
+
+    // ---- hospitals and clinics (H3b) ----
+
+    /** Register, list, find, switch diversion with PUT (twice is harmless), and the error codes around them. */
+    @Test
+    void facilitiesOverHttp() throws Exception {
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content(hospital("api-h1", 13.0827, 80.2707, "[\"CARDIAC\"]")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.kind").value("HOSPITAL"))
+                .andExpect(jsonPath("$.capabilities[0]").value("CARDIAC"))
+                .andExpect(jsonPath("$.accepting").value(true));
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content(hospital("api-h1", 13.0827, 80.2707, "[]")))
+                .andExpect(status().isConflict());
+
+        http.perform(get("/api/facilities/api-h1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Hospital api-h1"));
+        http.perform(get("/api/facilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == 'api-h1')]").exists());
+        http.perform(get("/api/facilities/api-nowhere")).andExpect(status().isNotFound());
+
+        for (int i = 0; i < 2; i++) {
+            http.perform(put("/api/facilities/api-h1/accepting").contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"accepting": false}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.accepting").value(false));
+        }
+        http.perform(put("/api/facilities/api-nowhere/accepting").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accepting": true}
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    /** The domain's rules surface as 400s: a clinic that accepts, an unknown capability or kind, an unknown base. */
+    @Test
+    void badFacilityRequestsAreRejected() throws Exception {
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "api-c1", "name": "Lane Clinic", "kind": "CLINIC",
+                                 "position": {"latitude": 13.08, "longitude": 80.27}, "accepting": true}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content(hospital("api-h2", 13.08, 80.27, "[\"DENTIST\"]")))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "api-h3", "name": "X", "kind": "SPA", "position": {"latitude": 13.08, "longitude": 80.27}}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "api-u-nobase", "type": "NURSE", "position": {"latitude": 13.08, "longitude": 80.27},
+                                 "baseId": "api-nowhere"}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(get("/api/units/api-u-nobase")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * Scene to hospital over HTTP, in Kolkata (far from every other test): the ambulance belongs to the hospital,
+     * the crew asks for transport with STROKE, the trip answers with the hospital and needs, a repeat is a 200, and
+     * complete closes the case. A trip that has not arrived is a 409.
+     */
+    @Test
+    void aPatientIsTakenToHospitalOverHttp() throws Exception {
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content(hospital("kol-h1", 22.5800, 88.3700, "[\"STROKE\"]")))
+                .andExpect(status().isCreated());
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                        .content(patient("kol-p1", 22.5726, 88.3639)))
+                .andExpect(status().isCreated());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "kol-u1", "type": "AMBULANCE_ALS",
+                                 "position": {"latitude": 22.5750, "longitude": 88.3650}, "baseId": "kol-h1"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.baseId").value("kol-h1"));
+
+        String readingAnswer = http.perform(post("/api/readings").contentType(MediaType.APPLICATION_JSON)
+                        .content(criticalReading("kol-p1")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String caseId = JsonPath.read(readingAnswer, "$.openCase.id");
+        service.tick();
+        String tripId = JsonPath.read(http.perform(get("/api/units/kol-u1/trip"))
+                .andReturn().getResponse().getContentAsString(), "$.id");
+
+        http.perform(post("/api/trips/" + tripId + "/transport")).andExpect(status().isConflict());
+
+        http.perform(post("/api/trips/" + tripId + "/accept")).andExpect(status().isOk());
+        http.perform(post("/api/trips/" + tripId + "/arrive")).andExpect(status().isOk());
+        for (int i = 0; i < 2; i++) {
+            http.perform(post("/api/trips/" + tripId + "/transport").contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"needs": ["STROKE"]}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("TRANSPORTING"))
+                    .andExpect(jsonPath("$.hospitalId").value("kol-h1"))
+                    .andExpect(jsonPath("$.needs[0]").value("STROKE"));
+        }
+        http.perform(get("/api/cases/" + caseId))
+                .andExpect(jsonPath("$.status").value("TRANSPORTING"));
+
+        http.perform(post("/api/trips/" + tripId + "/complete"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DONE"));
+        http.perform(get("/api/cases/" + caseId))
+                .andExpect(jsonPath("$.status").value("CLOSED"));
     }
 }

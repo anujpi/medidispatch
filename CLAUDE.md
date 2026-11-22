@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (822 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 142 in dispatch-service)
+## Built so far (833 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 153 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
 Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
@@ -311,13 +311,22 @@ Controllers only translate HTTP <-> DispatchService calls; no logic. Decisions t
 always 200 with the outcome (DUPLICATE, TOO_OLD... are not errors, so devices don't retry); unit without a trip -> 204.
 - PatientController (/api): POST /patients (201; body PatientRequest), GET /patients/{id}/case, POST /readings (body is
   the domain VitalsReading record itself; 200 + ReadingResult), GET /cases/{id}.
-- UnitController (/api/units): POST (201 + UnitInfo; body UnitRequest), GET /{id}, GET /{id}/trip (200 or 204; 404 for
+- UnitController (/api/units): POST (201 + UnitInfo; body UnitRequest, optional baseId: unknown base -> 400), GET /{id}, GET /{id}/trip (200 or 204; 404 for
   an unknown unit), PUT /{id}/position (204; body Coordinates; PUT = idempotent by design), POST /{id}/back-in-service.
-- TripController (/api/trips): GET /{id}, POST /{id}/accept, /arrive, /complete (action URLs, not "set the status").
+- TripController (/api/trips): GET /{id}, POST /{id}/accept, /arrive, /transport, /complete (action URLs, not "set
+  the status"). /transport body TransportRequest {"needs": [...]}, @RequestBody(required = false): no body or null
+  needs = nothing special.
+- FacilityController (/api/facilities): POST (201 + FacilityInfo; body FacilityRequest; duplicate id 409, accepting
+  clinic / unknown capability or kind 400), GET (all, sorted by id), GET /{id}, PUT /{id}/accepting (body
+  AcceptingRequest {"accepting": false}; PUT = sets a value, repeat-safe; clinic -> true is 400). ponytail: no login,
+  any caller acts for any hospital (BACKLOG).
 - Request records: Coordinates(Double latitude, Double longitude) + toLocation() (NOT Location as a body: missing
   double fields silently become 0.0; boxed Double + null check refuses them), PatientRequest(id, Coordinates home),
-  UnitRequest(id, ResourceType type, Coordinates position). Compact constructors refuse a missing position; blank ids
-  and missing types are refused by the engine's own constructors.
+  UnitRequest(id, ResourceType type, Coordinates position, String baseId). Compact constructors refuse a missing
+  position; blank ids and missing types are refused by the engine's own constructors. FacilityRequest(id, name, kind,
+  position, capabilities, Boolean accepting): kind and position required, missing capabilities = none, missing
+  accepting = (kind == HOSPITAL); toFacility() lets the Facility record check the rest. AcceptingRequest(Boolean):
+  required (guessing could misdirect ambulances). TransportRequest(Set<Capability> needs): null -> Set.of().
 - ApiErrors (@RestControllerAdvice, returns Spring's ProblemDetail, RFC 9457): NotFoundException 404,
   IllegalStateException 409 (ponytail: a real bug throwing ISE would show as 409), IllegalArgumentException 400,
   HttpMessageNotReadableException 400 (detail = getMostSpecificCause().getMessage(); covers broken JSON, unknown enum
@@ -499,7 +508,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
   same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
-## Hospitals (H1, H1b, H2, H3a written; H3b, H3c to do)
+## Hospitals (H1, H1b, H2, H3a, H3b written; H3c to do)
 - Capability enum: CARDIAC, STROKE, TRAUMA, PAEDIATRIC. FacilityKind: HOSPITAL, CLINIC.
 - Facility record (id, name, location, kind, capabilities, accepting) replaced H1's Hospital: one record with a kind,
   because hospitals and clinics differ only in canTreat. Compact constructor: blank id/name, null location/kind/
@@ -552,10 +561,20 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   23503, transport needs hospital, a transporting unit cannot get a second trip), JdbcFacilityRepositoryTest (8),
   JpaAssignmentRepositoryTest +3 (hospital + needs round trip, empty needs, TRANSPORTING still active),
   JdbcResourceRepositoryTest +1 (base round trip).
-- H3b next (F): EngineConfig beans (FacilityRepository, DestinationChooser, TransportCoordinator); DispatchService
-  methods (registerFacility, setAccepting, units with a base that must exist, startTransport repeat-safe: already
-  TRANSPORTING -> return as is); FacilityController; POST /trips/{id}/transport. H3c: GET /facilities/{id}/units and
-  /inbound (pre-alert: ETA = straight line at 40 km/h from the unit's live position, ponytail; latest vitals; needs).
+- H3b (service + REST): EngineConfig beans facilityRepository (JdbcFacilityRepository), destinationChooser,
+  transportCoordinator. DispatchService takes FacilityRepository + TransportCoordinator (constructor: ...,
+  tripMonitor, facilities, transport, clock, tx). New methods, each one transaction inside the lock:
+  registerFacility(Facility) (duplicate id -> ISE), setAccepting(id, boolean) (unknown -> NotFoundException; clinic
+  -> IAE from withAccepting), findFacility, facilities(), startTransport(tripId, needs) (already TRANSPORTING ->
+  returned unchanged, first hospital and needs stand). registerUnit(id, type, where, baseId): unknown base -> IAE
+  (400: a wrong value in the body, not a wrong URL), no unit created. completeTrip unchanged (works from
+  TRANSPORTING). DTOs: FacilityInfo (new), UnitInfo + baseId, TripInfo + hospitalId + needs, LiveSnapshot +
+  facilities (decided: tens of rows, diversion shows live). Simulators unchanged (decided).
+  Tests: DispatchServiceTest +8 (register/list/find, duplicate, diversion, base must exist, Mrs. Sharma end to end,
+  repeated transport, no hospital = nothing changes, snapshot facilities); ApiTest +3 (facilities over HTTP, bad
+  facility requests 400, Kolkata transport over HTTP with a based ambulance).
+- H3c next (F): GET /api/facilities/{id}/units (its fleet) and /inbound (pre-alert: TRANSPORTING trips to it, band,
+  latest vitals, needs, ETA = straight line at 40 km/h from the unit's live position, ponytail).
 - Registration (decided Nov 22): the OPERATOR adds facilities (POST /facilities; the simulator plays the operator);
   self sign-up is skipped (trust: a fake hospital must never get patients). Each hospital manages its own:
   PUT /facilities/{id}/accepting, POST /units with baseId (base must exist), GET /facilities/{id}/units (its fleet),
@@ -564,6 +583,6 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
 
 ## Next steps
 Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-hospitals H3b (service + REST; F), then H3c (hospital views, pre-alert; F). Then the
+hospitals H3c (hospital views: fleet and inbound pre-alert; F). Then the
 simulator drives the service over HTTP and registers hospitals and clinics; units start at and return to their base (F).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

@@ -44,7 +44,8 @@ public class UnitController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public UnitInfo register(@RequestBody UnitRequest request) {
-        return service.registerUnit(request.id(), request.type(), request.position().toLocation());
+        return service.registerUnit(request.id(), request.type(), request.position().toLocation(),
+                request.baseId());
     }
 
     /**

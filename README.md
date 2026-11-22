@@ -233,11 +233,14 @@ Web requests arrive on many threads at once, so every method holds one shared lo
 
 | Endpoint | What it does |
 |---|---|
-| `POST /api/patients`, `POST /api/units` | register a patient or a unit (201) |
+| `POST /api/patients`, `POST /api/units` | register a patient or a unit (201); a unit can name its base hospital or clinic |
 | `POST /api/readings` | one vitals reading; always 200 with the outcome (`ACCEPTED`, `DUPLICATE`, `TOO_OLD`, ...) |
 | `GET /api/units/{id}/trip` | the crew app asks "do I have a job?" (200 with the trip, or 204) |
 | `PUT /api/units/{id}/position` | the crew phone reports where it is (204) |
 | `POST /api/trips/{id}/accept`, `/arrive`, `/complete` | the crew's steps on a trip |
+| `POST /api/trips/{id}/transport` | the crew takes the patient to hospital, e.g. `{"needs": ["STROKE"]}`; the engine picks the hospital |
+| `POST /api/facilities`, `GET /api/facilities`, `GET /api/facilities/{id}` | the operator adds hospitals and clinics; list or look one up |
+| `PUT /api/facilities/{id}/accepting` | a hospital declares diversion (`{"accepting": false}`) or ends it |
 | `POST /api/units/{id}/back-in-service` | an offline unit is ready again |
 | `GET /api/cases/{id}`, `/api/patients/{id}/case`, `/api/units/{id}`, `/api/trips/{id}` | look things up |
 
@@ -263,7 +266,9 @@ The trip's second leg works in the engine too. When the crew decides the patient
 
 The database knows about hospitals too. A new migration adds the facilities table, each unit's base, and the trip's hospital and needs, without touching the existing data. The database enforces the same rules as the code: a clinic can never accept patients, a transport always has a hospital, and an ambulance carrying a patient can never be given a second trip.
 
-Next: the hospital endpoints, then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+The hospital side is open over HTTP: the operator registers hospitals and clinics, a hospital switches its own diversion, units can be registered with their base, and the crew tells the service it is taking the patient in. The answer says which hospital was chosen. Every step is safe to repeat on a weak network, and the live feed now includes the hospitals with their diversion status.
+
+Next: the hospital's own screen data (its fleet and the patients on their way), then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 

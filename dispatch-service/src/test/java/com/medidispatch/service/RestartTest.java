@@ -40,7 +40,7 @@ class RestartTest {
         try (ConfigurableApplicationContext first = start()) {
             DispatchService service = first.getBean(DispatchService.class);
             service.registerPatient("p1", HOME);
-            service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY);
+            service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
             caseId = service.submitReading(critical("p1")).openCase().id();
             service.tick();
             tripId = service.activeTripOf("u1").orElseThrow().id();

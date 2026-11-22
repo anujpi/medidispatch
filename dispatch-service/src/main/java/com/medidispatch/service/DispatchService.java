@@ -3,7 +3,9 @@ package com.medidispatch.service;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.Case;
+import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.Resource;
@@ -14,11 +16,13 @@ import com.medidispatch.core.engine.CaseManager;
 import com.medidispatch.core.engine.DispatchCoordinator;
 import com.medidispatch.core.engine.ProcessingResult;
 import com.medidispatch.core.engine.TimeoutMonitor;
+import com.medidispatch.core.engine.TransportCoordinator;
 import com.medidispatch.core.engine.TripMonitor;
 import com.medidispatch.core.engine.UnitTracker;
 import com.medidispatch.core.engine.VitalsProcessor;
 import com.medidispatch.core.port.AssignmentRepository;
 import com.medidispatch.core.port.CaseRepository;
+import com.medidispatch.core.port.FacilityRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceRepository;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -29,6 +33,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The single front door to the dispatch engine. Everything outside the engine (REST controllers, the live feed,
@@ -67,6 +72,8 @@ public class DispatchService {
     private final DispatchCoordinator coordinator;
     private final TimeoutMonitor timeoutMonitor;
     private final TripMonitor tripMonitor;
+    private final FacilityRepository facilities;
+    private final TransportCoordinator transport;
     private final Clock clock;
     private final TransactionTemplate tx;
 
@@ -84,6 +91,8 @@ public class DispatchService {
      * @param coordinator       sends units to waiting cases
      * @param timeoutMonitor    finds crews that never acknowledged a trip
      * @param tripMonitor       finds trips whose unit went silent or stopped moving
+     * @param facilities        where hospitals and clinics are stored
+     * @param transport         starts the second leg of a trip, scene to hospital
      * @param clock             the engine's clock, used to timestamp snapshots
      * @param tx                runs a piece of work as one database transaction (created by Boot)
      */
@@ -91,7 +100,8 @@ public class DispatchService {
                            AssignmentRepository assignments, VitalsProcessor processor, CaseManager caseManager,
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
                            DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
-                           Clock clock, TransactionTemplate tx) {
+                           FacilityRepository facilities, TransportCoordinator transport, Clock clock,
+                           TransactionTemplate tx) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -103,6 +113,8 @@ public class DispatchService {
         this.coordinator = coordinator;
         this.timeoutMonitor = timeoutMonitor;
         this.tripMonitor = tripMonitor;
+        this.facilities = facilities;
+        this.transport = transport;
         this.clock = clock;
         this.tx = tx;
     }
@@ -130,17 +142,23 @@ public class DispatchService {
      *
      * @param id    the unit id, unique
      * @param type  what kind of unit it is
-     * @param where where the unit is now
+     * @param where  where the unit is now
+     * @param baseId the hospital or clinic the unit belongs to; {@code null} for none
      * @return the new unit
-     * @throws IllegalStateException if a unit with this id already exists
+     * @throws IllegalStateException    if a unit with this id already exists
+     * @throws IllegalArgumentException if the base does not exist (a wrong value in the request, so 400, not 404)
      */
-    public synchronized UnitInfo registerUnit(String id, ResourceType type, Location where) {
+    public synchronized UnitInfo registerUnit(String id, ResourceType type, Location where, String baseId) {
         // execute: a transaction whose result (the lambda's return value) is handed back after the commit.
         return tx.execute(status -> {
             if (resources.findById(id).isPresent()) {
                 throw new IllegalStateException("Unit " + id + " already exists");
             }
-            Resource unit = new Resource(id, type, where);
+            // Checked here for a clear message; the units.base_id foreign key would refuse it anyway.
+            if (baseId != null && facilities.findById(baseId).isEmpty()) {
+                throw new IllegalArgumentException("Base " + baseId + " does not exist");
+            }
+            Resource unit = new Resource(id, type, where, baseId);
             resources.save(unit);
             return UnitInfo.from(unit);
         });
@@ -221,8 +239,9 @@ public class DispatchService {
     }
 
     /**
-     * The crew finished on scene: the trip becomes DONE and the unit is free again. When the main (PRIMARY) unit
-     * finishes, the patient is treated as stabilised and the case is closed. All of it is one transaction: the trip
+     * The crew finished, on scene or after handing the patient over at the hospital: the trip becomes DONE and the
+     * unit is free again. When the main (PRIMARY) unit finishes, the patient is treated as stabilised and the case is
+     * closed. All of it is one transaction: the trip
      * is never DONE while its case stays open.
      *
      * <p>Safe to repeat: if the trip is already DONE, it is returned unchanged and the case is not touched again.
@@ -262,6 +281,66 @@ public class DispatchService {
             requireUnit(unitId);
             unitTracker.onBackInService(unitId);
             return UnitInfo.from(resources.findById(unitId).orElseThrow());
+        });
+    }
+
+    /**
+     * Adds a hospital or clinic (done by the operator; hospitals do not sign themselves up).
+     *
+     * @param facility the new facility
+     * @return the stored facility
+     * @throws IllegalStateException if a facility with this id already exists
+     */
+    public synchronized FacilityInfo registerFacility(Facility facility) {
+        return tx.execute(status -> {
+            // Without this check, save() would silently replace the existing facility.
+            if (facilities.findById(facility.id()).isPresent()) {
+                throw new IllegalStateException("Facility " + facility.id() + " already exists");
+            }
+            facilities.save(facility);
+            return FacilityInfo.from(facility);
+        });
+    }
+
+    /**
+     * A hospital declares diversion ({@code false}: full, send patients elsewhere when possible) or ends it. Setting
+     * the value it already has changes nothing, so a repeat is harmless.
+     *
+     * @param facilityId the facility
+     * @param accepting  whether its emergency department takes new patients
+     * @return the updated facility
+     * @throws NotFoundException        if there is no such facility
+     * @throws IllegalArgumentException if it is a clinic and {@code accepting} is {@code true}
+     */
+    public synchronized FacilityInfo setAccepting(String facilityId, boolean accepting) {
+        return tx.execute(status -> {
+            Facility updated = requireFacility(facilityId).withAccepting(accepting);
+            facilities.save(updated);
+            return FacilityInfo.from(updated);
+        });
+    }
+
+    /**
+     * The crew takes the patient to hospital: the engine picks the hospital from where the unit is and what the
+     * patient needs, and the trip and the case move to TRANSPORTING together.
+     *
+     * <p>Safe to repeat: if the trip is already TRANSPORTING, it is returned unchanged (the hospital already chosen
+     * stands, and the {@code needs} of the repeat are ignored).
+     *
+     * @param tripId the main trip of the case; must be ARRIVED
+     * @param needs  the specialist services the patient needs; empty means nothing special
+     * @return the updated trip, with its hospital
+     * @throws NotFoundException     if there is no such trip
+     * @throws IllegalStateException if the trip cannot transport (not the main trip, not arrived, not an ambulance)
+     *                               or no hospital is registered; nothing is changed
+     */
+    public synchronized TripInfo startTransport(String tripId, Set<Capability> needs) {
+        return tx.execute(status -> {
+            Assignment trip = requireTrip(tripId);
+            if (trip.status() == AssignmentStatus.TRANSPORTING) {
+                return TripInfo.from(trip);
+            }
+            return TripInfo.from(transport.start(tripId, needs));
         });
     }
 
@@ -308,7 +387,7 @@ public class DispatchService {
             for (Assignment a : assignments.findActive()) {
                 trips.add(TripInfo.from(a));
             }
-            return new LiveSnapshot(clock.instant(), units, openCases, trips);
+            return new LiveSnapshot(clock.instant(), units, openCases, trips, facilityInfos());
         });
     }
 
@@ -318,6 +397,23 @@ public class DispatchService {
      * @param unitId the unit
      * @return the unit, or empty if there is none with this id
      */
+    /**
+     * Looks up a hospital or clinic by id.
+     *
+     * @param facilityId the facility
+     * @return the facility, or empty if there is none with that id
+     */
+    public synchronized Optional<FacilityInfo> findFacility(String facilityId) {
+        return tx.execute(status -> facilities.findById(facilityId).map(f -> FacilityInfo.from(f)));
+    }
+
+    /**
+     * @return every hospital and clinic, sorted by id
+     */
+    public synchronized List<FacilityInfo> facilities() {
+        return tx.execute(status -> facilityInfos());
+    }
+
     public synchronized Optional<UnitInfo> findUnit(String unitId) {
         return tx.execute(status -> resources.findById(unitId).map(r -> UnitInfo.from(r)));
     }
@@ -393,6 +489,22 @@ public class DispatchService {
      * @return the trip, so callers can check its status without a second lookup
      * @throws NotFoundException if it does not exist
      */
+    private List<FacilityInfo> facilityInfos() {
+        List<FacilityInfo> all = new ArrayList<>();
+        for (Facility f : facilities.findAll()) {
+            all.add(FacilityInfo.from(f));
+        }
+        return all;
+    }
+
+    private Facility requireFacility(String facilityId) {
+        Optional<Facility> facility = facilities.findById(facilityId);
+        if (facility.isEmpty()) {
+            throw new NotFoundException("Facility " + facilityId + " not found");
+        }
+        return facility.get();
+    }
+
     private Assignment requireTrip(String tripId) {
         Optional<Assignment> trip = assignments.findById(tripId);
         if (trip.isEmpty()) {
