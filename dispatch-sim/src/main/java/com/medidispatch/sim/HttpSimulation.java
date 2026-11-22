@@ -59,12 +59,13 @@ public final class HttpSimulation {
         }
         Map<String, LiveUnit> units = new LinkedHashMap<>();
         for (Resource r : plan.units()) {
-            LiveUnit unit = new LiveUnit(new SimulatedUnit(r.id(), r.type(), r.location()), clock, link,
-                    new Random(dice.nextLong()), config);
+            // each unit starts at its base, which is also its home to drive back to after a trip
+            LiveUnit unit = new LiveUnit(new SimulatedUnit(r.id(), r.type(), r.location(), r.location()), clock,
+                    link, new Random(dice.nextLong()), config);
             units.put(r.id(), unit);
             agents.add(unit);
         }
-        link.connect(patients, units);
+        link.connect(patients, units, plan, new Random(dice.nextLong()));
 
         AtomicInteger threadNumber = new AtomicInteger();
         agentPool = Executors.newScheduledThreadPool(AGENT_THREADS, (Runnable work) -> {
@@ -111,13 +112,15 @@ public final class HttpSimulation {
     }
 
     /**
-     * @return one line: simulated time so far, readings sent, trips seen and finished, 409s and errors
+     * @return one line: simulated time so far, readings sent, trips seen, finished and taken to hospital, 409s and
+     *         errors
      */
     public String status() {
         Duration simulated = Duration.between(LiveSimulation.START, clock.instant());
-        return String.format("sim +%dh%02dm | readings %d | trips %d seen, %d finished | 409s %d | errors %d",
+        return String.format(
+                "sim +%dh%02dm | readings %d | trips %d seen, %d finished, %d to hospital | 409s %d | errors %d",
                 simulated.toHours(), simulated.toMinutesPart(), link.readings(), link.tripsSeen(),
-                link.tripsFinished(), link.conflicts(), link.errors());
+                link.tripsFinished(), link.transported(), link.conflicts(), link.errors());
     }
 
     /** @return readings the service accepted */
@@ -125,6 +128,9 @@ public final class HttpSimulation {
 
     /** @return trips the crews completed */
     public long tripsFinished() { return link.tripsFinished(); }
+
+    /** @return patients the crews took to hospital and handed over */
+    public long transported()   { return link.transported(); }
 
     /** @return failed requests other than 409s; should stay 0 */
     public long errors()        { return link.errors(); }

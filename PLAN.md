@@ -21,7 +21,7 @@ and warns it before the patient arrives.
 | `dispatch-core` | pure-Java engine: scoring placeholder, cases, response ladder, ring search, claim, preemption, first responders, response upgrade, timeouts, trip monitoring, recovery, back in service |
 | `dispatch-sim` | seeded 2-hour simulation + endless threaded live city (`LiveSimulation`) |
 | `dispatch-sim-fx` | JavaFX window: live map, panel, report |
-| tests | 882 (610 core, 78 sim, 22 fx, 172 service) |
+| tests | 893 (610 core, 88 sim, 22 fx, 173 service) |
 | `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); on Postgres + PostGIS + TimescaleDB (JDBC adapters, JPA for trips, one transaction per call inside the lock, survives a restart). Hospitals and clinics: registry, destination choice, transport leg, V2 schema, endpoints, each hospital's fleet and inbound pre-alert |
 
 ---
@@ -197,9 +197,9 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
   - [x] H3c: hospital views: its fleet, inbound pre-alerts
 - [x] people: unit owner required, driver name and phone, patient name/age/sex and emergency contact, hospital
       phone (F, added Nov 22)
-- [ ] the simulator drives the service over HTTP, as a Bangalore city (F)
+- [x] the simulator drives the service over HTTP, as a Bangalore city (F)
   - [x] S1: the city set up over HTTP, readings, positions, crews' steps from the live feed, end-to-end test
-  - [ ] S2: transport to hospital, return to base
+  - [x] S2: transport to hospital, return to base
 - [ ] live map page on OpenStreetMap, reading the live feed (F, added Nov 22)
 - [ ] security moved up: login, roles, hospital scoping (L; it was in week 2)
 

@@ -1,10 +1,14 @@
 package com.medidispatch.sim;
 
+import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.Consciousness;
 import com.medidispatch.core.domain.VitalsReading;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Random;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,5 +32,48 @@ public class HttpLinkTest {
         assertEquals(35, sent.respRate());
         assertEquals(39.5, sent.temperature());
         assertEquals(Consciousness.UNRESPONSIVE, sent.consciousness());
+    }
+
+    // ---- what the crew says a patient needs (S2) ----
+
+    /** A child always needs paediatrics, whatever the dice say. */
+    @Test
+    void aChildAlwaysNeedsPaediatrics() {
+        Random dice = new Random(7);
+        for (int i = 0; i < 200; i++) {
+            assertTrue(HttpLink.needsFor(9, dice).contains(Capability.PAEDIATRIC));
+        }
+    }
+
+    /** An adult never gets paediatrics, and gets at most one special need. */
+    @Test
+    void anAdultNeedsAtMostOneThingAndNeverPaediatrics() {
+        Random dice = new Random(7);
+        for (int i = 0; i < 200; i++) {
+            Set<Capability> needs = HttpLink.needsFor(68, dice);
+            assertFalse(needs.contains(Capability.PAEDIATRIC));
+            assertTrue(needs.size() <= 1);
+        }
+    }
+
+    /** Over many adults every outcome happens, so patients spread over the city's hospitals. */
+    @Test
+    void adultsGetEveryKindOfNeed() {
+        Random dice = new Random(7);
+        Set<Set<Capability>> seen = new HashSet<>();
+        for (int i = 0; i < 200; i++) {
+            seen.add(HttpLink.needsFor(68, dice));
+        }
+        assertEquals(Set.of(Set.of(), Set.of(Capability.CARDIAC), Set.of(Capability.STROKE), Set.of(Capability.TRAUMA)),
+                seen);
+    }
+
+    @Test
+    void theSameSeedGivesTheSameNeeds() {
+        Random a = new Random(11);
+        Random b = new Random(11);
+        for (int i = 0; i < 50; i++) {
+            assertEquals(HttpLink.needsFor(40 + i, a), HttpLink.needsFor(40 + i, b));
+        }
     }
 }

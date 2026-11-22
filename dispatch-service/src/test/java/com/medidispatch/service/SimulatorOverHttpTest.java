@@ -73,6 +73,33 @@ class SimulatorOverHttpTest {
         assertEquals(10, service.facilities().size());            // the six hospitals and four clinics
     }
 
+    /**
+     * Scene to hospital over HTTP: a crew takes a serious patient in, the service picks the hospital, the ambulance
+     * drives there and hands over. The trip then holds its hospital and is DONE, and its case is CLOSED.
+     */
+    @Test
+    void aSimulatedPatientIsTakenToHospitalAndHandedOver() throws InterruptedException {
+        HttpSimulation city = new HttpSimulation(SMALL_FAST_CITY, URI.create("http://localhost:" + port));
+        city.setUp();
+        city.start();
+        try {
+            long deadline = System.nanoTime() + WAIT.toNanos();
+            while (handedOver() == 0 && System.nanoTime() < deadline) {
+                Thread.sleep(250);
+            }
+            assertTrue(handedOver() > 0, "nobody was handed over at a hospital within " + WAIT + ": " + city.status());
+            assertTrue(city.transported() > 0);
+            assertEquals(0, city.errors(), city.status());
+            String hospital = jdbc.sql("""
+                    SELECT a.hospital_id FROM assignments a JOIN cases c ON c.id = a.case_id
+                    WHERE a.hospital_id IS NOT NULL AND a.status = 'DONE' AND c.status = 'CLOSED' LIMIT 1
+                    """).query(String.class).single();
+            assertTrue(hospital.startsWith("blr-h-"), hospital);  // a hospital, never a clinic
+        } finally {
+            city.stop();
+        }
+    }
+
     /** A second city on top of a first would collide on ids, so set-up refuses a database that is not empty. */
     @Test
     void setUpRefusesADatabaseThatIsNotEmpty() {
@@ -83,6 +110,11 @@ class SimulatorOverHttpTest {
 
         assertTrue(refused.getMessage().contains("docker compose down -v"), refused.getMessage());
         city.stop();
+    }
+
+    private long handedOver() {
+        return jdbc.sql("SELECT count(*) FROM assignments WHERE hospital_id IS NOT NULL AND status = 'DONE'")
+                .query(Long.class).single();
     }
 
     private long closedCases() {

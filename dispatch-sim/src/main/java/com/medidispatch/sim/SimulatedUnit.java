@@ -12,6 +12,10 @@ import java.time.Duration;
  * straight line at its speed. Each trip comes with a {@link Behaviour}: most trips go normally, but a unit can
  * never answer, break down halfway (stops moving, keeps reporting) or lose its signal halfway (keeps moving,
  * stops reporting). The engine is expected to notice the last three on its own.
+ * <p>
+ * A trip can have a second leg ({@link #goTo(Location)}: the patient on board, to a hospital). A unit with a home
+ * (its base) drives back there after a trip ({@link #headHome()}), reporting its position on the way; a unit without
+ * a home (the in-memory simulator) parks where the trip ended.
  */
 final class SimulatedUnit {
 
@@ -36,7 +40,9 @@ final class SimulatedUnit {
     private final String id;
     private final ResourceType type;
     private final double speedKmPerHour;
+    private final Location home;                   // its base; null: parks where a trip ends
     private Location position;
+    private boolean goingHome;
 
     // the current trip; assignmentId is null when the unit is free
     private String assignmentId;
@@ -50,14 +56,27 @@ final class SimulatedUnit {
     private boolean silent;
 
     /**
-     * Creates a free unit.
+     * Creates a free unit with no home: after a trip it stays where it is.
      *
      * @param id       unit id, also used in the engine
      * @param type     what kind of unit it is
      * @param position where it starts
      */
     SimulatedUnit(String id, ResourceType type, Location position) {
+        this(id, type, position, null);
+    }
+
+    /**
+     * Creates a free unit.
+     *
+     * @param id       unit id, also used in the engine
+     * @param type     what kind of unit it is
+     * @param position where it starts
+     * @param home     its base, where it drives back to after a trip; {@code null} for none
+     */
+    SimulatedUnit(String id, ResourceType type, Location position, Location home) {
         this.id = id;
+        this.home = home;
         this.type = type;
         this.position = position;
         this.speedKmPerHour = switch (type) {
@@ -83,6 +102,34 @@ final class SimulatedUnit {
         this.arrived = false;
         this.broken = false;
         this.silent = false;
+        this.goingHome = false;                       // a new trip replaces the drive home
+    }
+
+    /**
+     * The second leg of the current trip: the crew drives on with the patient (to a hospital). The trip stays the
+     * same and was answered already; the unit reports its position again and arrives a second time. No planned
+     * failure on this leg: the dispatch service cannot fail a trip that is carrying a patient yet.
+     *
+     * @param destination where to drive
+     * @throws IllegalStateException if the unit has no trip
+     */
+    void goTo(Location destination) {
+        if (assignmentId == null) {
+            throw new IllegalStateException(id + " has no trip to continue");
+        }
+        this.target = destination;
+        this.behaviour = Behaviour.NORMAL;
+        this.tripKm = position.distanceKmTo(destination);
+        this.arrived = false;
+        this.broken = false;
+        this.silent = false;
+    }
+
+    /** A free unit with a home starts driving back there; otherwise nothing happens. */
+    void headHome() {
+        if (assignmentId == null && home != null && !position.equals(home)) {
+            goingHome = true;
+        }
     }
 
     /**
@@ -93,6 +140,13 @@ final class SimulatedUnit {
      *         still report it), otherwise {@code NOTHING}
      */
     TickResult tick(Duration dt) {
+        if (assignmentId == null && goingHome) {
+            position = CityMap.towards(position, home, speedKmPerHour * dt.toMillis() / 3_600_000.0);
+            if (position.equals(home)) {
+                goingHome = false;                        // back at base
+            }
+            return TickResult.NOTHING;
+        }
         if (assignmentId == null || arrived) {
             return TickResult.NOTHING;                        // free, or already on scene
         }
@@ -135,13 +189,13 @@ final class SimulatedUnit {
     }
 
     /**
-     * Says whether the unit sends a position report this step: only while driving to a patient with a working
-     * signal (a broken-down unit keeps reporting the same spot).
+     * Says whether the unit sends a position report this step: while driving on a trip with a working signal (a
+     * broken-down unit keeps reporting the same spot), and while driving home.
      *
      * @return {@code true} if the unit reports its position now
      */
     boolean reportsPosition() {
-        return assignmentId != null && acknowledged && !arrived && !silent;
+        return (assignmentId != null && acknowledged && !arrived && !silent) || goingHome;
     }
 
     boolean busy()              { return assignmentId != null; }
@@ -154,4 +208,5 @@ final class SimulatedUnit {
     boolean acknowledged()      { return acknowledged; }
     boolean arrived()           { return arrived; }
     Location target()           { return target; }       // null when free
+    boolean goingHome()         { return goingHome; }
 }

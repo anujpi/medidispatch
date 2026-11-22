@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (882 tests: 610 in dispatch-core, 78 in dispatch-sim, 22 in dispatch-sim-fx, 172 in dispatch-service)
+## Built so far (893 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 173 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -626,7 +626,7 @@ permissive like the core. Dispatch never uses any of it.
   and deferred to the security piece (BACKLOG access control). Also for that piece: caller-chosen guessable patient
   ids (p1) -> consider server-generated UUIDs; emergency contact only for roles that need it.
 
-## Simulator over HTTP (S1 written; S2 next), dispatch-sim, package com.medidispatch.sim
+## Simulator over HTTP (DONE: S1 + S2), dispatch-sim, package com.medidispatch.sim
 The Bangalore city drives the RUNNING service over HTTP like real wearables and crew phones. The in-memory
 LiveSimulation and the JavaFX window are unchanged.
 - CityLink (package-private interface): reading, answered, position, arrived, backInService. LiveEngine implements
@@ -670,7 +670,30 @@ LiveSimulation and the JavaFX window are unchanged.
   build; ~45 s alone because the container starts too); set-up refuses a non-empty database.
   dispatch-service has dispatch-sim as a TEST-scope dependency (never the other way: the service is packaged as a
   Spring Boot jar, which other modules cannot load classes from).
-- To run it: docker compose down -v; docker compose up -d; start DispatchServiceApplication; run HttpSimulatorMain.
+- S2 (transport and return to base), HTTP mode only (the in-memory LiveEngine still treats on arrival):
+  - SimulatedUnit: optional home (4-arg constructor; 3-arg = no home, parks where a trip ends). goTo(destination)
+    = second leg of the SAME trip (ISE without a trip): new target, behaviour forced NORMAL (no planned failure with a
+    patient on board: the service cannot fail a TRANSPORTING trip), arrives a second time. headHome() (free + home +
+    not there) -> drives back reporting positions, goingHome() false once home; assign() cancels it.
+    reportsPosition() = on a trip (acknowledged, not arrived, not silent) OR goingHome.
+  - LiveUnit: TripOrder.Kind LEG (drive on to target); END with DONE/CANCELLED -> free + headHome; after repair,
+    back in service -> headHome. A unit driving home is AVAILABLE in the service (no service change).
+  - HttpLink: connect(patients, units, plan, dice) also keeps unit types, patient ages, facility locations. Scene
+    arrival: POST arrive, NOT treated (stays at its steady peak, so the band holds and the pre-alert shows real
+    vitals). On-scene time up: trip demoted to SUPPORT -> nothing; else GET /api/cases/{id} band; an ambulance
+    (canCarryPatient) with HIGH/CRITICAL -> POST /transport {"needs": needsFor(age, dice)} -> LEG to the chosen
+    hospital (transporting set); refused -> fall back to treat + complete. Otherwise treat + POST complete. The
+    second arrival of a transporting trip = handover: treat, POST complete, transported++.
+    static needsFor(age, dice): under 18 -> PAEDIATRIC (+ TRAUMA 30%); adults CARDIAC 30%, STROKE 25%, TRAUMA 20%,
+    nothing 25%. Status line: "... N finished, M to hospital ...".
+  - HttpSimulation: each SimulatedUnit gets home = its base location; transported() accessor.
+  - Tests: SimulatedUnitTest +6, HttpLinkTest +4 (needs rule), SimulatorOverHttpTest +1 (a trip DONE with a
+    blr-h-* hospital and its case CLOSED, 0 errors).
+- To run it: docker compose down -v; docker compose up -d (from C:\Projects\medidispatch); in IntelliJ reload Maven
+  once (Jackson), start DispatchServiceApplication, then run HttpSimulatorMain (Program arguments e.g.
+  "http://localhost:8080 30" for speed 30). At speed 10 the first transport comes after about 4-5 minutes. Watch with
+  curl.exe localhost:8080/api/facilities/blr-h-jayanagar/inbound. Run again only after wiping (setup refuses).
+  Tried by the user on Nov 22: the city registered (10 facilities).
 
 ## Next steps
 Order agreed Nov 22 (the user does not want pacing by PLAN's week dates): B1 people (done) -> S1/S2 the simulator
@@ -678,8 +701,7 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1 is done (see "Simulator over HTTP"). Next: S2 = crews take HIGH/CRITICAL patients to hospital (POST
-/transport with random needs, drive to the chosen hospital, POST complete at the handover; treat the patient at the
-handover rather than on arrival, so the pre-alert shows real vitals), then drive back to base (simulator only; the
-unit is AVAILABLE while driving back and can be dispatched from wherever it is). Then M1 (map), then SEC.
+S1 and S2 are done (see "Simulator over HTTP"). Next: M1 = a live map page in the browser on OpenStreetMap, served
+by the service and reading /api/live: hospitals and clinics, patients with open cases coloured by band, units
+moving, trips; then SEC.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

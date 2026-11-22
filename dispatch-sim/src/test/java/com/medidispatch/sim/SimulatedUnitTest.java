@@ -141,4 +141,85 @@ public class SimulatedUnitTest {
         assertEquals("trip-2", unit.assignmentId());
         assertEquals(TickResult.NOTHING, unit.tick(TICK));             // has to answer again first
     }
+
+    // ---- the second leg and the drive home (S2) ----
+
+    private static final Location HOSPITAL = new Location(12.94, 77.50);  // about 2.2 km beyond the patient
+    private static final Location BASE = new Location(12.88, 77.50);      // about 2.2 km behind the start
+
+    /** After the patient, the same trip drives on to the hospital, reporting again, and arrives a second time. */
+    @Test
+    void goToDrivesTheSameTripOnToTheHospital() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.NORMAL);
+        answer(unit);
+        assertEquals(TickResult.ARRIVED, driveFor(unit, 100));
+        assertFalse(unit.reportsPosition());                          // on scene
+
+        unit.goTo(HOSPITAL);
+
+        assertEquals("trip-1", unit.assignmentId());
+        assertTrue(unit.reportsPosition());
+        assertEquals(TickResult.ARRIVED, driveFor(unit, 100));
+        assertEquals(HOSPITAL, unit.position());
+    }
+
+    /** A planned breakdown is for the way to the patient only: the leg with the patient on board always goes well. */
+    @Test
+    void theLegToTheHospitalHasNoPlannedFailure() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.NORMAL);
+        answer(unit);
+        driveFor(unit, 100);
+        unit.goTo(HOSPITAL);
+
+        assertEquals(TickResult.ARRIVED, driveFor(unit, 100));
+        assertFalse(unit.broken());
+        assertFalse(unit.silent());
+    }
+
+    @Test
+    void goToWithoutATripIsRefused() {
+        SimulatedUnit unit = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, START);
+
+        assertThrows(IllegalStateException.class, () -> unit.goTo(HOSPITAL));
+    }
+
+    /** A free unit with a home drives back, reporting on the way, and goes quiet once home. */
+    @Test
+    void aFreeUnitWithAHomeDrivesBackAndStopsReportingThere() {
+        SimulatedUnit unit = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, START, BASE);
+
+        unit.headHome();
+        assertTrue(unit.goingHome());
+        assertTrue(unit.reportsPosition());
+        for (int i = 0; i < 100 && unit.goingHome(); i++) {
+            unit.tick(TICK);
+        }
+
+        assertEquals(BASE, unit.position());
+        assertFalse(unit.goingHome());
+        assertFalse(unit.reportsPosition());
+    }
+
+    @Test
+    void aNewTripReplacesTheDriveHome() {
+        SimulatedUnit unit = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, START, BASE);
+        unit.headHome();
+
+        unit.assign("trip-2", PATIENT, Behaviour.NORMAL);
+
+        assertFalse(unit.goingHome());
+        assertEquals(PATIENT, unit.target());
+    }
+
+    /** The in-memory simulator's units have no home: they park where the trip ended, as before. */
+    @Test
+    void aUnitWithoutAHomeStaysWhereItIs() {
+        SimulatedUnit unit = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, START);
+
+        unit.headHome();
+        unit.tick(TICK);
+
+        assertFalse(unit.goingHome());
+        assertEquals(START, unit.position());
+    }
 }

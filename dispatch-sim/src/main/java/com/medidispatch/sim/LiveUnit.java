@@ -28,15 +28,16 @@ final class LiveUnit implements Runnable {
     /**
      * A message from the engine to the unit.
      *
-     * @param kind         a new trip, a role change on the current trip, or the end of a trip
+     * @param kind         a new trip, a role change on the current trip, the trip's next leg (to a hospital), or
+     *                     the end of a trip
      * @param assignmentId the trip it is about
-     * @param target       where to go (START only)
+     * @param target       where to go (START and LEG)
      * @param role         the trip's role (START and ROLE)
      * @param finalStatus  how the trip ended (END only)
      */
     record TripOrder(Kind kind, String assignmentId, Location target, AssignmentRole role,
                      AssignmentStatus finalStatus) {
-        enum Kind { START, ROLE, END }
+        enum Kind { START, ROLE, LEG, END }
     }
 
     private final SimulatedUnit unit;
@@ -103,6 +104,7 @@ final class LiveUnit implements Runnable {
             backInServiceAt = null;
             link.position(unit.id(), unit.position());      // the engine may have an old position for it
             link.backInService(unit.id());
+            unit.headHome();
         }
         if (elapsed.isPositive()) {                           // nothing moves while the clock is paused
             TickResult result = unit.tick(elapsed);
@@ -133,6 +135,11 @@ final class LiveUnit implements Runnable {
                         role = order.role();
                     }
                 }
+                case LEG -> {
+                    if (order.assignmentId().equals(unit.assignmentId())) {
+                        unit.goTo(order.target());
+                    }
+                }
                 case END -> {
                     if (order.assignmentId().equals(unit.assignmentId())) {
                         unit.free();
@@ -140,6 +147,8 @@ final class LiveUnit implements Runnable {
                         if (order.finalStatus() == AssignmentStatus.TIMED_OUT
                                 || order.finalStatus() == AssignmentStatus.FAILED) {
                             backInServiceAt = now.plus(config.repairTime());   // the engine took it offline
+                        } else {
+                            unit.headHome();                  // only a unit with a base has a home to go to
                         }
                     }
                 }
