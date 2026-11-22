@@ -42,8 +42,8 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (929 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
-35 in dispatch-routing)
+## Built so far (941 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
+47 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -710,7 +710,7 @@ Clarified with the user: the backend service is the REAL application's core; the
 map.html are dev/demo tools; the real front end (React control room, crew PWA, hospital panel, patient app) is
 still to be built.
 
-## Routing (R1 DONE; R2 next), module dispatch-routing, package com.medidispatch.routing
+## Routing (R1 + R2 DONE; R3 next), module dispatch-routing, package com.medidispatch.routing
 Why: everything moves and is measured in straight lines today (units fly over lakes; dispatch picks the nearest as
 the crow flies; ETA = straight line at 40 km/h). Decided: write our own graph and algorithms (not OSRM/GraphHopper)
 for the learning and portfolio value; traffic = a MODEL (road-class speeds, rush-hour factors, simulated incidents,
@@ -753,9 +753,30 @@ routes and the map draws them.
 - Tests (35): RoadClassTest 4, GraphBuilderTest 8, OverpassImportTest 7, GraphCleanupTest 5 (incl. one-way dead
   end, 200k loop), NearestNodeTest 6 (incl. closer node in the next ring, 1,000 random points vs brute force),
   GraphFileTest 5.
-- R2 next (L): Dijkstra on travel time (length / class speed), then A* (straight-line distance / top speed as the
-  heuristic, so it never overestimates); tests on hand-made graphs, then Koramangala -> Jayanagar on the real graph
-  comparing nodes explored and time.
+- R2 (Dijkstra and A*): CostModel interface (seconds(g, edge), maxSpeedMetresPerSecond() for A*'s estimate);
+  FreeFlow (length / class speed; max worked out from the enum). MinHeap (package-private): binary heap in two
+  arrays (children 2i+1, 2i+2), sift with the moving item held aside, grows by doubling, no decrease-key: lazy
+  deletion. Route record (nodes[], seconds, metres, explored = nodes taken off the heap) + from(), to(), points(g).
+  Router(g, cost): dijkstra(from, to) / aStar(from, to) -> Optional<Route> (empty = unreachable; bad node = IAE);
+  one private search, `guided` picks the priority (dist vs dist + estimate); settled[] skips stale heap copies and
+  finished nodes; stops when the TARGET IS POPPED; cameFrom[] + cameBy[] rebuild the path (a CSR edge does not know
+  its start). estimate(node, target) (package-private) = ESTIMATE_MARGIN 0.9999 x haversine metres (same 6,371 km
+  radius as Location, raw doubles, no objects) / max speed; the margin absorbs float rounding of stored lengths so the
+  estimate never overestimates. ponytail: fresh arrays per search (~5 MB, ~1 ms); reuse with stamps, bidirectional
+  search, contraction hierarchies later. RouteDemo main: loads data/bangalore.graph, compares both.
+- R2 results on the real graph (Nov 22): graph loads in 150 ms. Koramangala -> Jayanagar (3.5 km straight): 8.4 min,
+  6.5 km by road; Dijkstra 24,932 nodes / 6.1 ms, A* 11,429 / 5.2 ms. Electronic City -> Hebbal (22.3 km): 34.8 min,
+  27.6 km; Dijkstra 289,596 / 46.2 ms, A* 168,558 / 50.5 ms. Same answers. A* gained only 1.7-2.2x (predicted
+  5-10x): the estimate assumes 80 km/h (motorway) while most roads are 20-45 km/h, so it is weak, and each A* step
+  pays for 4 trig calls. Decided: accept for now (5-50 ms per route is fine for dispatch); R2b ALT landmarks (16
+  landmarks, |d(L,t) - d(L,n)| lower bounds, typically 5-20x fewer nodes, ~25 MB) is the planned optimisation later,
+  with these numbers as the "before".
+- R2 tests: MinHeapTest 4, RouterTest 6 (fast detour beats slow lane, one-way not driven backwards, unreachable,
+  start = target, path continuous and totals add up, bad input), RouterPropertyTest 2 (random 30x30 grids with
+  one-way and missing streets: A* cost = Dijkstra for 200 pairs and never explores more; estimate <= real time).
+- R3 next (L): the traffic model as a second CostModel: time-of-day factors per road class (rush hours slow main
+  roads), simulated incidents (closed road, jammed area), ambulance siren factor; A*'s max speed must cover the
+  siren factor so the estimate stays safe.
 
 ## Live map (M1, DONE)
 - dispatch-service/src/main/resources/static/map.html: served by Spring Boot from static/ (no controller), open
