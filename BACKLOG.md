@@ -50,6 +50,12 @@ Ordered roughly by priority inside each group.
 - [ ] **Reproducible ids.** Case and trip ids come from `UUID.randomUUID()`, so two simulator runs with the same seed
       can differ slightly when two cases tie in the queue. An id-generator port would make runs fully reproducible.
 
+## Hospitals
+
+- [ ] **Hospital access control.** The hospital endpoints (diversion, adding units, fleet, inbound patients) will
+      have no login at first, so any caller can act for any hospital. With roles (Spring Security, week 3), a
+      hospital user may only touch its own facility, and only the operator may add facilities.
+
 ## Small cleanups
 
 - [ ] Delete `engine/ResponseTypes.java` (unused since the response ladder).

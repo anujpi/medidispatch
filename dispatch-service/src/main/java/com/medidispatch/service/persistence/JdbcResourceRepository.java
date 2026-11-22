@@ -174,6 +174,7 @@ public class JdbcResourceRepository implements ResourceRepository {
         return Resource.restore(
                 rs.getString("id"),
                 ResourceType.valueOf(rs.getString("type")),
+                null, // baseId: the units.base_id column arrives with the V2 migration (H3)
                 ResourceStatus.valueOf(rs.getString("status")),
                 new Location(rs.getDouble("lat"), rs.getDouble("lon")),
                 new Location(rs.getDouble("from_lat"), rs.getDouble("from_lon")),

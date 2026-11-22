@@ -42,9 +42,10 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (733 tests: 523 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
+## Built so far (768 tests: 558 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
-(AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
+(AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
+Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
 AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
@@ -496,8 +497,35 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
   same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
+## Hospitals (H1 + H1b written, core only; H2, H3 to do)
+- Capability enum: CARDIAC, STROKE, TRAUMA, PAEDIATRIC. FacilityKind: HOSPITAL, CLINIC.
+- Facility record (id, name, location, kind, capabilities, accepting) replaced H1's Hospital: one record with a kind,
+  because hospitals and clinics differ only in canTreat. Compact constructor: blank id/name, null location/kind/
+  capabilities, a null capability (hand loop, so IAE not NPE) -> IAE; a CLINIC with capabilities or accepting=true ->
+  IAE (a clinic has no emergency department; withAccepting(true) on a clinic throws too). Set.copyOf. Factories
+  hospital(id, name, location, capabilities, accepting) and clinic(id, name, location). isHospital(). canTreat(needed)
+  = isHospital() && capabilities.containsAll(needed) (a clinic treats nothing, not even an empty set).
+  withAccepting(b) = diversion on/off (save over the old record).
+- FacilityRepository port (save replaces, findById, findAll sorted by id) + InMemoryFacilityRepository.
+- engine/DestinationChooser.choose(from, needed) -> Optional<Facility>: filters to hospitals FIRST, then 1) nearest
+  capable + accepting, 2) nearest capable even on diversion, 3) nearest accepting, 4) nearest at all; ties by id;
+  empty only if no hospital. Straight-line km (ponytail: routing later; reads all facilities).
+- Resource.baseId: Optional<String>; 3-arg constructor = no base (delegates to the 4-arg one); blank -> IAE;
+  restore(id, type, baseId, status, ...) (baseId is the 3rd parameter). Refer by id like trips do; existence is
+  checked at registration (H3) and by a foreign key. JdbcResourceRepository passes null until V2 adds units.base_id.
+- Agreed design for the rest: one trip with a second leg: trip ARRIVED -> TRANSPORTING -> DONE (or ARRIVED -> DONE);
+  case RESPONDING -> TRANSPORTING -> STABILISED -> CLOSED (TRANSPORTING makes upgrader, preemptor and monitors skip).
+  The crew names the needed capabilities when transport starts. ETA = straight line at 40 km/h (ponytail).
+  H2 = core transport leg (L). H3 = V2 migration (facilities table, assignments.hospital_id, units.base_id, CHECKs for
+  TRANSPORTING), JdbcFacilityRepository, DispatchService methods, REST, pre-alert read model (mostly F).
+- Registration (decided Nov 22): the OPERATOR adds facilities (POST /facilities; the simulator plays the operator);
+  self sign-up is skipped (trust: a fake hospital must never get patients). Each hospital manages its own:
+  PUT /facilities/{id}/accepting, POST /units with baseId (base must exist), GET /facilities/{id}/units (its fleet),
+  GET /facilities/{id}/inbound (pre-alert: ETA, latest vitals, needs). No auth yet (BACKLOG). Dispatch still sends
+  the nearest free unit whatever its base; the base is where a unit waits and returns to.
+
 ## Next steps
 Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-hospitals: domain, registry, destination choice, second trip leg, pre-alert data (L). Then the simulator drives the
-service over HTTP (F).
+hospitals H2 (core transport leg, L; add a BACKLOG entry for breakdown during transport), then H3 (F). Then the
+simulator drives the service over HTTP and registers hospitals and clinics; units start at and return to their base (F).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

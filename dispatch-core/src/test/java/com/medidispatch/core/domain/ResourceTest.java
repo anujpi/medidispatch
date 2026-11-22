@@ -233,16 +233,39 @@ public class ResourceTest {
         assertEquals(BANGALORE, r.location());
     }
 
+    // ---- base: the hospital or clinic a unit belongs to ----
+
+    @Test
+    void aUnitCreatedWithoutABaseHasNone() {
+        assertEquals(Optional.empty(), newResource().baseId());
+    }
+
+    @Test
+    void theBaseIsKept() {
+        Resource r = new Resource("r1", ResourceType.AMBULANCE_BLS, BANGALORE, "h-apollo");
+
+        assertEquals(Optional.of("h-apollo"), r.baseId());
+    }
+
+    @Test
+    void aBlankBaseIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new Resource("r1", ResourceType.AMBULANCE_BLS, BANGALORE, " "));
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore("u1", ResourceType.NURSE, "", ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+    }
+
     // ---- restore: rebuilding a stored unit (used by storage adapters) ----
 
     /** restore brings back every field, including the movement reference point and both times. */
     @Test
     void restoreRebuildsEveryField() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.OFFLINE, CHENNAI, BANGALORE,
-                T0, T0.minusSeconds(60));
+        Resource r = Resource.restore("u1", ResourceType.NURSE, "clinic-7", ResourceStatus.OFFLINE, CHENNAI,
+                BANGALORE, T0, T0.minusSeconds(60));
 
         assertEquals("u1", r.id());
         assertEquals(ResourceType.NURSE, r.type());
+        assertEquals(Optional.of("clinic-7"), r.baseId());
         assertEquals(ResourceStatus.OFFLINE, r.status());
         assertEquals(CHENNAI, r.location());
         assertEquals(BANGALORE, r.movedFrom());
@@ -253,7 +276,7 @@ public class ResourceTest {
     /** null times mean "never", exactly like a new unit. */
     @Test
     void restoreKeepsNeverAsEmpty() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, HERE, null, null);
+        Resource r = Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null);
 
         assertTrue(r.lastSeenAt().isEmpty());
         assertTrue(r.lastMovedAt().isEmpty());
@@ -265,7 +288,7 @@ public class ResourceTest {
      */
     @Test
     void aRestoredUnitMeasuresMovementFromItsSavedReferencePoint() {
-        Resource r = Resource.restore("u1", ResourceType.AMBULANCE_ALS, ResourceStatus.ASSIGNED, JITTER, HERE, T0, T0);
+        Resource r = Resource.restore("u1", ResourceType.AMBULANCE_ALS, null, ResourceStatus.ASSIGNED, JITTER, HERE, T0, T0);
 
         r.reportLocation(STEP, T0.plusSeconds(10));
 
@@ -276,7 +299,7 @@ public class ResourceTest {
     /** A restored unit still obeys its rules: OFFLINE cannot go straight to ASSIGNED. */
     @Test
     void aRestoredUnitStillObeysTheRules() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.OFFLINE, HERE, HERE, null, null);
+        Resource r = Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.OFFLINE, HERE, HERE, null, null);
 
         assertThrows(IllegalStateException.class, () -> r.transitionTo(ResourceStatus.ASSIGNED));
         assertEquals(ResourceStatus.OFFLINE, r.status());
@@ -286,14 +309,14 @@ public class ResourceTest {
     @Test
     void restoreRejectsMissingValues() {
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, null, HERE, HERE, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, null, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, null, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, null, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore(" ", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+                () -> Resource.restore(" ", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+                () -> Resource.restore("u1", null, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, null, HERE, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, null, HERE, null, null));
     }
 }

@@ -41,7 +41,7 @@ class JdbcResourceRepositoryTest {
     /** Every field survives the round trip: status, both positions (not swapped), both times. */
     @Test
     void savedUnitComesBackWithEveryField() {
-        repo.save(Resource.restore("u1", ResourceType.DOCTOR, ResourceStatus.ASSIGNED, kmNorth(1), DELHI,
+        repo.save(Resource.restore("u1", ResourceType.DOCTOR, null, ResourceStatus.ASSIGNED, kmNorth(1), DELHI,
                 T0, T0.minusSeconds(60)));
 
         Resource found = repo.findById("u1").orElseThrow();
@@ -222,7 +222,7 @@ class JdbcResourceRepositoryTest {
 
     /** A unit at {@code where} in the given status, never seen. */
     private static Resource withStatus(String id, ResourceType type, ResourceStatus status, Location where) {
-        return Resource.restore(id, type, status, where, where, null, null);
+        return Resource.restore(id, type, null, status, where, where, null, null);
     }
 
     private static List<String> ids(List<Resource> units) {
