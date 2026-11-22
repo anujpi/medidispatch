@@ -42,8 +42,8 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (941 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
-47 in dispatch-routing)
+## Built so far (961 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
+67 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -710,7 +710,7 @@ Clarified with the user: the backend service is the REAL application's core; the
 map.html are dev/demo tools; the real front end (React control room, crew PWA, hospital panel, patient app) is
 still to be built.
 
-## Routing (R1 + R2 DONE; R3 next), module dispatch-routing, package com.medidispatch.routing
+## Routing (R1, R2, R3 DONE; R4 next), module dispatch-routing, package com.medidispatch.routing
 Why: everything moves and is measured in straight lines today (units fly over lakes; dispatch picks the nearest as
 the crow flies; ETA = straight line at 40 km/h). Decided: write our own graph and algorithms (not OSRM/GraphHopper)
 for the learning and portfolio value; traffic = a MODEL (road-class speeds, rush-hour factors, simulated incidents,
@@ -774,9 +774,31 @@ routes and the map draws them.
 - R2 tests: MinHeapTest 4, RouterTest 6 (fast detour beats slow lane, one-way not driven backwards, unreachable,
   start = target, path continuous and totals add up, bad input), RouterPropertyTest 2 (random 30x30 grids with
   one-way and missing streets: A* cost = Dijkstra for 200 pairs and never explores more; estimate <= real time).
-- R3 next (L): the traffic model as a second CostModel: time-of-day factors per road class (rush hours slow main
-  roads), simulated incidents (closed road, jammed area), ambulance siren factor; A*'s max speed must cover the
-  siren factor so the estimate stays safe.
+- R3 (traffic model): CostModel.seconds(g, FROM, edge) now gets the start node (incidents need the midpoint);
+  FreeFlow ignores it; Router skips a road whose cost is Double.POSITIVE_INFINITY (closed).
+  TrafficProfile.bangaloreWeekday(): 24 hourly factors for MAIN roads (00-05 1.0, 06 0.9, 07 0.75, 08 0.55, 09 0.45,
+  10 0.5, 11 0.65, 12-15 0.7, 16 0.65, 17 0.5, 18 0.4, 19 0.45, 20 0.6, 21 0.75, 22 0.9, 23 1.0); factor(class,
+  LocalTime) = 1 - (1 - main) x share, linear between hours, wraps at 23; share(): TRUNK/PRIMARY/SECONDARY 1.0,
+  MOTORWAY 0.8, TERTIARY/UNCLASSIFIED 0.6, RESIDENTIAL/LIVING_STREET 0.3 (switch without default). Factors in (0, 1].
+  Incident(id, centre, radiusMetres, speedFactor 0..<1) record, closure(...) = factor 0; a road piece is inside
+  when its MIDPOINT is (real pieces are short; a toy test with one 1.5-km piece had to centre the circle on the road).
+  TrafficModel(profile): incidents in a ConcurrentHashMap by id (add replaces, remove, incidents() sorted);
+  at(Instant | LocalTime, emergency) -> a FROZEN CostModel (record Frozen): 8 class speeds computed once; siren =
+  min(traffic x SIREN_TRAFFIC_BOOST 1.3, free x SIREN_CAP 1.2); incidents copied into Areas with a bounding box (1%
+  larger) checked before the exact haversine; overlapping jams multiply; jams apply after the siren; top speed =
+  fastest free-flow x 1.2 for emergencies. BANGALORE = Asia/Kolkata. ponytail: traffic frozen at departure;
+  time-dependent routing is the upgrade. Decided: circles (not edge ids: graph numbering changes on re-import),
+  weekday curve only, made-up but reasonable siren numbers.
+- R3 results on the real graph: Koramangala -> Jayanagar 03:00 normal 8.4 min / 6.5 km; 09:30 normal 15.6 min /
+  5.2 km (a DIFFERENT, shorter route through smaller roads: rush hour changes which route is fastest); 09:30
+  emergency 12.0 min; with a 150 m closure halfway along the rush-hour route 12.4 min (local detour).
+- R3 tests: TrafficProfileTest 6, TrafficModelTest 10 (jam only inside, closure + reopen, multiply, siren cap and
+  boost, top speed, frozen picture ignores later incidents, UTC -> Bangalore), TrafficRoutingTest 4 (night main road
+  vs rush-hour lane, closure detour, only road closed -> no route, A* = Dijkstra with random incidents/times/both
+  profiles). RouterPropertyTest.randomGrid is package-visible for reuse.
+- R4 next: a TravelTime port in core (straight line stays the default, core unchanged); the service loads
+  data/bangalore.graph with the traffic model; dispatch ranks the closest few candidates by drive time; hospital
+  choice and pre-alert ETA by drive time; the live feed carries each unit's route for R5's map.
 
 ## Live map (M1, DONE)
 - dispatch-service/src/main/resources/static/map.html: served by Spring Boot from static/ (no controller), open

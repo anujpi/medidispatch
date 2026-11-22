@@ -12,10 +12,12 @@ public interface CostModel {
 
     /**
      * @param g    the graph
-     * @param edge a road piece in it
-     * @return how many seconds driving it takes; never negative
+     * @param from the node the road piece starts at (a CSR edge does not know it; incidents need the road's midpoint)
+     * @param edge a road piece leaving {@code from}
+     * @return how many seconds driving it takes: never negative; {@code Double.POSITIVE_INFINITY} for a road that
+     *         cannot be driven (closed), which the router skips
      */
-    double seconds(RoadGraph g, int edge);
+    double seconds(RoadGraph g, int from, int edge);
 
     /**
      * @return the fastest any road can be driven under this model, in metres per second

@@ -110,7 +110,7 @@ public class RouterTest {
         for (int i = 1; i < route.nodes().length; i++) {
             int edge = edgeBetween(g, route.nodes()[i - 1], route.nodes()[i]);
             assertTrue(edge >= 0, "no road from " + route.nodes()[i - 1] + " to " + route.nodes()[i]);
-            seconds += cost.seconds(g, edge);
+            seconds += cost.seconds(g, route.nodes()[i - 1], edge);
             metres += g.length(edge);
         }
         assertEquals(seconds, route.seconds(), 1e-9);

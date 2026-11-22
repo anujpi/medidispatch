@@ -17,9 +17,9 @@ public final class FreeFlow implements CostModel {
         MAX_METRES_PER_SECOND = fastest / 3.6;
     }
 
-    /** @return length / speed (km/h divided by 3.6 is metres per second) */
+    /** @return length / speed (km/h divided by 3.6 is metres per second); the start node is not needed */
     @Override
-    public double seconds(RoadGraph g, int edge) {
+    public double seconds(RoadGraph g, int from, int edge) {
         return g.length(edge) / (g.roadClass(edge).speedKmh() / 3.6);
     }
 

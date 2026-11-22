@@ -16,7 +16,7 @@ public class RouterPropertyTest {
 
     private static final int SIDE = 30;
 
-    private static RoadGraph randomGrid(long seed) {
+    static RoadGraph randomGrid(long seed) {
         Random dice = new Random(seed);
         RoadClass[] classes = RoadClass.values();
         GraphBuilder b = new GraphBuilder();

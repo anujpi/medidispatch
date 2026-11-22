@@ -104,7 +104,11 @@ public final class Router {
                 if (settled[next]) {
                     continue;
                 }
-                double through = dist[node] + cost.seconds(g, e);
+                double step = cost.seconds(g, node, e);
+                if (step == Double.POSITIVE_INFINITY) {
+                    continue;                                 // a closed road
+                }
+                double through = dist[node] + step;
                 if (through < dist[next]) {                   // a cheaper way to next
                     dist[next] = through;
                     cameFrom[next] = node;
