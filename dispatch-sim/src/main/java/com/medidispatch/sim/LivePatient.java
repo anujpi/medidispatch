@@ -12,7 +12,8 @@ import java.util.Random;
  * <p>
  * It runs as a repeating task on the agent thread pool ({@link #run()}), and the engine thread calls
  * {@link #treat()} when an ambulance arrives. Both are {@code synchronized}, so the two threads never change it at
- * the same time. It never touches the engine directly: it only hands readings to {@link LiveEngine}.
+ * the same time. It never touches the engine directly: it only hands readings to its {@link CityLink} (the engine in
+ * memory, or the running service over HTTP).
  * <p>
  * Illnesses arrive at random (a Poisson process): the wait until the next one is drawn from an exponential
  * distribution, so most waits are short-ish, a few are long, and nobody can predict the next one.
@@ -25,7 +26,7 @@ final class LivePatient implements Runnable {
     private final String id;
     private final Location home;
     private final ScaledClock clock;
-    private final LiveEngine engine;
+    private final CityLink link;
     private final Random dice;
     private final double meanHoursBetweenIllnesses;
 
@@ -40,16 +41,16 @@ final class LivePatient implements Runnable {
      * @param id                         patient id, also used in the engine
      * @param home                       where the patient is
      * @param clock                      the live simulation's clock
-     * @param engine                     where readings are sent
+     * @param link                       where readings are sent
      * @param dice                       this patient's own randomness
      * @param meanHoursBetweenIllnesses  average time between two illnesses
      */
-    LivePatient(String id, Location home, ScaledClock clock, LiveEngine engine, Random dice,
+    LivePatient(String id, Location home, ScaledClock clock, CityLink link, Random dice,
                 double meanHoursBetweenIllnesses) {
         this.id = id;
         this.home = home;
         this.clock = clock;
-        this.engine = engine;
+        this.link = link;
         this.dice = dice;
         this.meanHoursBetweenIllnesses = meanHoursBetweenIllnesses;
         Instant now = clock.instant();
@@ -68,7 +69,7 @@ final class LivePatient implements Runnable {
             episode = new SimulatedPatient(id, home, now, randomPeak());
         }
         if (!now.isBefore(nextReadingAt)) {
-            engine.reading(episode.readingAt(now));
+            link.reading(episode.readingAt(now));
             nextReadingAt = now.plus(Simulation.READING_INTERVAL);
         }
     }

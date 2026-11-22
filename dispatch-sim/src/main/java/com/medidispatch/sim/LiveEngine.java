@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link WorldSnapshot}. The snapshot is immutable and kept in a {@code volatile} field, so the window can read the
  * latest one from its own thread at any time.
  */
-final class LiveEngine {
+final class LiveEngine implements CityLink {
 
     /** How often the engine ticks, in real time. */
     static final Duration BEAT = Duration.ofMillis(25);
@@ -175,12 +175,14 @@ final class LiveEngine {
     // ---------- jobs from other threads ----------
 
     /** A wearable reading arrives. */
-    void reading(VitalsReading reading) {
+    @Override
+    public void reading(VitalsReading reading) {
         onEngineThread(() -> metrics.onReading(engine.processor.process(reading)));
     }
 
     /** A crew answered its trip. Ignored if the trip has meanwhile ended or timed out. */
-    void answered(String assignmentId) {
+    @Override
+    public void answered(String assignmentId) {
         onEngineThread(() -> {
             if (statusOf(assignmentId) == AssignmentStatus.ASSIGNED) {
                 engine.assignmentManager.onEnRoute(assignmentId);
@@ -189,12 +191,14 @@ final class LiveEngine {
     }
 
     /** A unit reports where it is. */
-    void position(String unitId, Location where) {
+    @Override
+    public void position(String unitId, Location where) {
         onEngineThread(() -> engine.unitTracker.onLocationReported(unitId, where));
     }
 
     /** A unit reached its patient. Ignored if the trip has meanwhile ended (for example stood down). */
-    void arrived(String assignmentId) {
+    @Override
+    public void arrived(String assignmentId) {
         onEngineThread(() -> {
             if (statusOf(assignmentId) != AssignmentStatus.EN_ROUTE) {
                 return;
@@ -208,7 +212,8 @@ final class LiveEngine {
     }
 
     /** A repaired unit is ready again. */
-    void backInService(String unitId) {
+    @Override
+    public void backInService(String unitId) {
         onEngineThread(() -> {
             if (engine.resources.findById(unitId).orElseThrow().status() == ResourceStatus.OFFLINE) {
                 engine.unitTracker.onBackInService(unitId);

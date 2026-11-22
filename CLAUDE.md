@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (865 tests: 610 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 170 in dispatch-service)
+## Built so far (882 tests: 610 in dispatch-core, 78 in dispatch-sim, 22 in dispatch-sim-fx, 172 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -626,15 +626,60 @@ permissive like the core. Dispatch never uses any of it.
   and deferred to the security piece (BACKLOG access control). Also for that piece: caller-chosen guessable patient
   ids (p1) -> consider server-generated UUIDs; emergency contact only for roles that need it.
 
+## Simulator over HTTP (S1 written; S2 next), dispatch-sim, package com.medidispatch.sim
+The Bangalore city drives the RUNNING service over HTTP like real wearables and crew phones. The in-memory
+LiveSimulation and the JavaFX window are unchanged.
+- CityLink (package-private interface): reading, answered, position, arrived, backInService. LiveEngine implements
+  it (methods now public @Override); LivePatient and LiveUnit take a CityLink instead of LiveEngine.
+- Two clocks (decided): the city keeps its ScaledClock for the world's pace (illness, driving, on scene, repairs);
+  everything SENT carries real time (HttpLink.retimed(reading, Instant.now())). The service's timeouts stay real
+  seconds. LiveConfig.bangalore(): 60 patients, 6 ALS, 6 BLS, 5 nurses, 3 doctors, 8 illnesses/h, 5% of each
+  failure, 20 min repair, speed 10 (city size unused); withStartSpeed(speed).
+- BangaloreCity: bounds lat 12.83..13.10, lon 77.48..77.78; FACILITIES = 6 hospitals (blr-h-koramangala TRAUMA+
+  CARDIAC, blr-h-jayanagar CARDIAC+STROKE, blr-h-whitefield TRAUMA, blr-h-hebbal STROKE+PAEDIATRIC,
+  blr-h-malleshwaram PAEDIATRIC, blr-h-ecity none) and 4 clinics (blr-c-indiranagar, -yeshwanthpur, -banashankari,
+  -marathahalli), MADE-UP names at real neighbourhoods, phones +91 80 41/42xx. plan(config) -> Plan(facilities,
+  units, patients) using core objects: ambulances round-robin over hospitals, nurses/doctors over clinics, each at its
+  base with a generated driver; patients p001.. with generated name/age (10% children, else 30-85)/sex (2% OTHER),
+  70% with an emergency contact; all from the seed. inside(location).
+- ServiceClient: java.net.http.HttpClient + Jackson 3 (tools.jackson.databind.json.JsonMapper; JsonNode.asString(),
+  asText() is deprecated in 3). get/post/put return Response(status, JsonNode body), never throw for error statuses
+  (only UncheckedIOException when unreachable); stream(path) -> Stream<String> lines (BodyHandlers.ofLines) for SSE;
+  static text(node, member) (null for missing/JSON null); close() = shutdownNow (Java 21+).
+- LiveFeedReader: daemon thread "live-feed", reconnects after 2 s; static readEvents(lines, onEvent): data lines
+  joined with \n, a blank line ends an event, one optional space after "data:", other lines skipped, an unfinished
+  event is not sent. The service names its events "snapshot".
+- TripWatcher.update(snapshot JsonNode) -> List<Change(kind NEW|ROLE|GONE, tripId, unitId, caseId, patientId, role,
+  target)>: NEW first (in feed order, target = the open case's lat/lon), then ROLE, then GONE sorted by id.
+- HttpLink implements CityLink: setUp(plan) refuses if GET /api/facilities is non-empty (message names docker
+  compose down -v), then POSTs facilities, units, patients (bodies as LinkedHashMaps). ONE sender thread
+  ("http-sender") sends everything in order and owns the trip bookkeeping (trips, onSceneSince); a timer thread
+  flushes positions every 1 s (ConcurrentHashMap keeps only each unit's latest; a broken-down unit still resends its
+  spot so the stall check works) and checks on-scene every 250 ms; arrived -> POST arrive, then if PRIMARY treat the
+  patient and start the on-scene timer (Simulation.ON_SCENE on the city clock) -> POST complete. GONE -> GET
+  /api/trips/{id} for the final status -> TripOrder END (TIMED_OUT/FAILED start the repair). Counters: readings,
+  tripsSeen, tripsFinished, conflicts (409s: normal races), errors (printed for the first 20). After stop() nothing
+  counts as an error (an interrupted in-flight request is not a failure).
+- HttpSimulation (public): constructor builds the plan and agents on a paused ScaledClock; setUp(); start() (agents
+  every LiveEngine.BEAT on 4 daemon threads); stop(); status() one line; readingsSent/tripsFinished/errors.
+  HttpSimulatorMain [url=http://localhost:8080] [speed=10]: set up, start, status every 10 s, Ctrl+C stops.
+- Kept in package com.medidispatch.sim (not .http, changed from the plan) to reuse the package-private agents.
+- Tests: TripWatcherTest (6), LiveFeedReaderTest (4), BangaloreCityTest (4), HttpLinkTest (1, re-timing);
+  dispatch-service SimulatorOverHttpTest (RANDOM_PORT + TestDatabaseConfig + resetApp): a small city (seed 42, 8
+  patients, 400 illnesses/h, no failures, speed 300) closes a case within 90 s with 0 errors (about 10 s in the full
+  build; ~45 s alone because the container starts too); set-up refuses a non-empty database.
+  dispatch-service has dispatch-sim as a TEST-scope dependency (never the other way: the service is packaged as a
+  Spring Boot jar, which other modules cannot load classes from).
+- To run it: docker compose down -v; docker compose up -d; start DispatchServiceApplication; run HttpSimulatorMain.
+
 ## Next steps
 Order agreed Nov 22 (the user does not want pacing by PLAN's week dates): B1 people (done) -> S1/S2 the simulator
 over HTTP, building a BANGALORE city (real coordinates, made-up hospital names at neighbourhoods, units owned by
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1 plan (approved directions): a CityLink interface between agents and the engine (LiveEngine in memory, HttpLink
-over HTTP); keep ScaledClock for the world's pace but send REAL timestamps; one sender thread (order matters);
-positions coalesced to at most one per unit per second; crews learn trips from the /api/live SSE feed; refuse to
-start on a non-empty database; Jackson 3.1.5 in dispatch-sim; package com.medidispatch.sim.http; default HTTP
-speed 10.
+S1 is done (see "Simulator over HTTP"). Next: S2 = crews take HIGH/CRITICAL patients to hospital (POST
+/transport with random needs, drive to the chosen hospital, POST complete at the handover; treat the patient at the
+handover rather than on arrival, so the pre-alert shows real vitals), then drive back to base (simulator only; the
+unit is AVAILABLE while driving back and can be dispatched from wherever it is). Then M1 (map), then SEC.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

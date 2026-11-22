@@ -18,6 +18,12 @@
             <artifactId>dispatch-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- JSON for talking to the running service over HTTP (the same Jackson 3 that Spring Boot 4 uses) -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>3.1.5</version>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

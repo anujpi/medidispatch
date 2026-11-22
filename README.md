@@ -275,7 +275,9 @@ Each hospital also sees its own fleet and a **pre-alert** of the patients on the
 
 **People.** Every unit belongs to a hospital or clinic and has a driver with a phone number, every patient has a name, age and sex (and optionally an emergency contact), and every hospital has a phone number. The engine never uses any of this to dispatch; it is there for the people: the control room can call the driver, and the hospital's pre-alert reads "Asha Rao, 68, F" instead of an id. All of it is synthetic, and it is not protected yet: anyone who can reach the service can read it until the security step.
 
-Next: the simulator driving the running service over HTTP, as a city in Bangalore, then a live map of it on real streets, then security. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**The simulator drives the real service.** A synthetic city laid over real Bangalore (six hospitals and four clinics with made-up names at real neighbourhoods such as Koramangala, Jayanagar and Whitefield) now runs against the running service over HTTP, exactly like real devices would: wearables post readings, crew apps hear about their trips from the live feed and accept, report positions, arrive and complete. The service does all the deciding and keeps everything in Postgres. The city runs sped up, but everything it sends carries real time, because the service's rules (60 seconds to answer, 30 seconds of silence) are in real seconds. An end-to-end test starts the real application and checks that a simulated patient goes from first reading to a closed case.
+
+Next: crews taking patients to hospital and driving back to base in the simulator, then a live map of the city on real streets, then security. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -303,6 +305,7 @@ Next: the simulator driving the running service over HTTP, as a city in Bangalor
 - [ ] The other known gaps in [BACKLOG.md](BACKLOG.md)
 - [x] Simulator window (JavaFX): the city, patients and units moving live
 - [x] Live, endless simulator: random illnesses and failures, repaired units back in service, one engine thread plus agent threads
+- [x] The simulator driving the running service over HTTP, as a Bangalore city
 - [ ] Scorer comparison in the simulator (once a second scorer exists)
 - [ ] Real scoring: NEWS2, trend analysis, personal baseline, context, data-quality handling
 
@@ -349,6 +352,8 @@ curl -N localhost:8080/api/live
 ```
 
 A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5433 on your machine, so it does not clash with a locally installed Postgres on 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). Start it before the service: the service connects at startup and Flyway brings the schema up to date (on a server, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` instead). Everything is stored there, so the service can be restarted without losing anything. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+
+To run the Bangalore city against the real service: wipe the database (`docker compose down -v`, then `docker compose up -d`), start the service (`DispatchServiceApplication`), then run `HttpSimulatorMain` in `dispatch-sim` (optional arguments: the service address, default `http://localhost:8080`, and the speed, default 10). It prints a status line every 10 seconds; `curl.exe -N localhost:8080/api/live` shows the live picture, and `curl.exe localhost:8080/api/facilities/blr-h-jayanagar/units` a hospital's fleet.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 

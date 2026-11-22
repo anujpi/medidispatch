@@ -41,7 +41,7 @@ final class LiveUnit implements Runnable {
 
     private final SimulatedUnit unit;
     private final ScaledClock clock;
-    private final LiveEngine engine;
+    private final CityLink link;
     private final Random dice;
     private final LiveConfig config;
     private final ConcurrentLinkedQueue<TripOrder> inbox = new ConcurrentLinkedQueue<>();
@@ -56,14 +56,14 @@ final class LiveUnit implements Runnable {
      *
      * @param unit   the moving part (position, speed, behaviour on a trip)
      * @param clock  the live simulation's clock
-     * @param engine where answers, positions and arrivals are sent
+     * @param link   where answers, positions and arrivals are sent (the engine in memory, or the service)
      * @param dice   this unit's own randomness
      * @param config failure chances and repair time
      */
-    LiveUnit(SimulatedUnit unit, ScaledClock clock, LiveEngine engine, Random dice, LiveConfig config) {
+    LiveUnit(SimulatedUnit unit, ScaledClock clock, CityLink link, Random dice, LiveConfig config) {
         this.unit = unit;
         this.clock = clock;
-        this.engine = engine;
+        this.link = link;
         this.dice = dice;
         this.config = config;
         this.lastTick = clock.instant();
@@ -101,20 +101,20 @@ final class LiveUnit implements Runnable {
         readOrders(now);
         if (backInServiceAt != null && !now.isBefore(backInServiceAt)) {
             backInServiceAt = null;
-            engine.position(unit.id(), unit.position());      // the engine may have an old position for it
-            engine.backInService(unit.id());
+            link.position(unit.id(), unit.position());      // the engine may have an old position for it
+            link.backInService(unit.id());
         }
         if (elapsed.isPositive()) {                           // nothing moves while the clock is paused
             TickResult result = unit.tick(elapsed);
             String trip = unit.assignmentId();
             if (result == TickResult.ACKNOWLEDGED) {
-                engine.answered(trip);
+                link.answered(trip);
             }
             if (unit.reportsPosition()) {
-                engine.position(unit.id(), unit.position());
+                link.position(unit.id(), unit.position());
             }
             if (result == TickResult.ARRIVED) {
-                engine.arrived(trip);
+                link.arrived(trip);
             }
         }
         publishView();

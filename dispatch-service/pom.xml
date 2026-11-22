@@ -38,6 +38,15 @@
             <artifactId>dispatch-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- tests only: the simulator drives this service over HTTP in an end-to-end test (SimulatorOverHttpTest).
+             Test scope, and only this direction: this module is packaged as a Spring Boot jar, which other modules
+             cannot load classes from. -->
+        <dependency>
+            <groupId>com.medidispatch</groupId>
+            <artifactId>dispatch-sim</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- controllers, the built-in Tomcat web server, JSON; the version comes from the BOM -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -77,6 +77,29 @@ public record LiveConfig(long seed,
     }
 
     /**
+     * The Bangalore city driven over HTTP ({@link HttpSimulation}): 60 patients, 6 ALS, 6 BLS, 5 nurses and 3 doctors
+     * (units are based at {@link BangaloreCity}'s hospitals and clinics), about 8 illnesses an hour, a 5% chance of
+     * each kind of unit failure, 20-minute repairs, speed 10. The city size is not used: the city's edges come from
+     * {@link BangaloreCity}.
+     *
+     * @return the default config for the simulator over HTTP
+     */
+    public static LiveConfig bangalore() {
+        return new LiveConfig(new Random().nextLong(), 30, 60, 6, 6, 5, 3, 8, 0.05, 0.05, 0.05,
+                Duration.ofMinutes(20), 10);
+    }
+
+    /**
+     * @param speed simulated seconds per real second, 1 to {@link LiveSimulation#MAX_SPEED}
+     * @return a copy of this config with only the start speed changed
+     * @throws IllegalArgumentException if the speed is out of range
+     */
+    public LiveConfig withStartSpeed(int speed) {
+        return new LiveConfig(seed, citySizeKm, patientCount, alsCount, blsCount, nurseCount, doctorCount,
+                illnessesPerHour, noAckChance, breakdownChance, signalLossChance, repairTime, speed);
+    }
+
+    /**
      * How far from a patient units are looked for: at least 20 km, more in a bigger city.
      *
      * @return the search radius in kilometres
