@@ -3,10 +3,12 @@ package com.medidispatch.service.live;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.service.DispatchService;
+import com.medidispatch.service.persistence.TestDatabaseConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
 import java.io.BufferedReader;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * for SSE the response never ends, so waiting for the end would wait forever.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(TestDatabaseConfig.class)
 class LiveFeedTest {
 
     @LocalServerPort

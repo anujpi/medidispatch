@@ -250,7 +250,9 @@ The API is built for **weak mobile networks**. When a crew taps Accept in a tunn
 
 The first database adapters are done: patients, units (with the nearby search) and claims, each a second implementation of a port the engine already uses, so the engine does not change. Each is tested on the real database. A test loads the same 60 random units into the in-memory and the database version and checks that both find the same units, in the same order, from several places in the city; and 20 threads racing for one ambulance through the database still produce exactly one winner. To read a stored case, unit or trip back, the engine gained one small `restore` method per class, which rebuilds an object as it was saved without letting it skip its rules afterwards.
 
-Next: the remaining adapters (cases, the dispatch queue, vitals and trips), then switching the service over to the database. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+Trips use JPA (Hibernate with Spring Data), next to plain SQL for the rest: trips are a flat table with simple lookups, which Spring Data writes from the method name alone (`findByUnitIdAndStatusIn`), while the claim, the queue and the map searches need SQL written by hand. The two share one database connection pool and one transaction manager. The service now connects to the database at startup and Flyway brings the schema up to date; the engine itself still keeps its state in memory until the last adapters are in.
+
+Next: the adapters for cases, the dispatch queue and vitals, then switching the engine over to the database. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -287,7 +289,8 @@ Next: the remaining adapters (cases, the dispatch queue, vitals and trips), then
 - [x] Live feed for screens (server-sent events)
 - [x] Database schema: Postgres + PostGIS + TimescaleDB, Flyway, tested with Testcontainers
 - [x] Database adapters for patients, units (nearby search) and claims
-- [ ] Database adapters for cases, the queue, vitals and trips (JPA), the service running on Postgres
+- [x] Trips on JPA; the service connects to the database and migrates it at startup
+- [ ] Database adapters for cases, the queue and vitals, the engine running on Postgres
 - [ ] Hospitals: registry, destination choice, pre-alert
 - [ ] The simulator driving the running service over HTTP
 - [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
@@ -320,7 +323,7 @@ To watch the live feed, keep this running in a terminal (`-N` prints data as it 
 curl -N localhost:8080/api/live
 ```
 
-A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). The service does not use it yet: it keeps everything in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). Start it before the service: the service connects at startup (on a server, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` instead). The engine still keeps its state in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -395,7 +398,8 @@ medidispatch/
                               (PatientRequest, UnitRequest, Coordinates), ApiErrors (exceptions to status codes)
       live/                   LiveFeed (server-sent events: the whole picture every second)
       persistence/            database adapters: JdbcPatientRepository, JdbcResourceRepository,
-                              JdbcResourceClaimer, DbTime (more to come)
+                              JdbcResourceClaimer, DbTime (plain SQL); JpaAssignmentRepository, TripEntity,
+                              TripJpaRepository (JPA); more to come
     src/main/resources/db/migration/
                               V1__init.sql (the database schema, applied by Flyway)
   BACKLOG.md                  known gaps to tackle later
@@ -422,7 +426,8 @@ Every component is covered by tests, including:
 - API tests over HTTP (MockMvc): the whole story from registration to closed case, a step out of order is 409 and a repeated step is 200, a resent reading is a duplicate, and every unknown id is 404 and every broken or impossible body is 400,
 - a live-feed test over a real network connection: a real server on a random port and Java's HTTP client reading the stream line by line as it arrives, checking that the first picture comes at once and that a new unit shows up in a later message,
 - database schema tests on a real Postgres in Docker (Testcontainers): two connections race to claim one ambulance and the second waits on the row lock, then loses; the database refuses a second open case, a second active trip, an unknown status and a duplicate reading; a unit 2 km away is found within 5 km and one 20 km away is not,
-- database adapter tests on the same real database: every field survives the round trip, saving a unit never undoes its claim, 20 threads race for one ambulance and exactly one wins, and the database search gives the same units in the same order as the in-memory one for a random fleet of 60.
+- database adapter tests on the same real database: every field survives the round trip, saving a unit never undoes its claim, 20 threads race for one ambulance and exactly one wins, and the database search gives the same units in the same order as the in-memory one for a random fleet of 60,
+- JPA tests for trips (a Spring "slice" that starts only the database layer, each test rolled back): every lookup the engine uses, and a second active trip for one ambulance refused by the database at the moment it is saved.
 
 Planned: the whole service test suite running on Postgres, and simulator-driven load tests.
 

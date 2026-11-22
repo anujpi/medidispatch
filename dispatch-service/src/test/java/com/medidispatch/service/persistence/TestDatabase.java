@@ -60,18 +60,49 @@ final class TestDatabase {
 
     /**
      * Inserts an open case (and its patient, {@code "p-" + caseId}) with plain SQL, for tests that need a case to
-     * exist: {@code units.claimed_by} references {@code cases}.
+     * exist: {@code units.claimed_by} and {@code assignments.case_id} reference {@code cases}. Committed at once.
      *
      * @param caseId the case id
      */
     static void openCase(String caseId) {
+        openCase(jdbc(), caseId);
+    }
+
+    /**
+     * Same as {@link #openCase(String)}, through the given client: with a client over Spring's DataSource inside a
+     * {@code @DataJpaTest}, the rows join the test's transaction and are rolled back with it.
+     *
+     * @param jdbc   the client to insert with
+     * @param caseId the case id
+     */
+    static void openCase(JdbcClient jdbc, String caseId) {
         String patientId = "p-" + caseId;
-        jdbc().sql("INSERT INTO patients (id, home) VALUES (:id, ST_Point(77.2090, 28.6139, 4326)::geography)")
+        jdbc.sql("INSERT INTO patients (id, home) VALUES (:id, ST_Point(77.2090, 28.6139, 4326)::geography)")
                 .param("id", patientId)
                 .update();
-        jdbc().sql("INSERT INTO cases (id, patient_id, status, band, opened_at) VALUES (:id, :patient, 'ALERTED', 'HIGH', now())")
+        jdbc.sql("INSERT INTO cases (id, patient_id, status, band, opened_at) VALUES (:id, :patient, 'ALERTED', 'HIGH', now())")
                 .param("id", caseId)
                 .param("patient", patientId)
                 .update();
+    }
+
+    // For TestDatabaseConfig: each first makes sure the container is started and migrated.
+
+    /** @return the container's JDBC URL (a random port on localhost) */
+    static String url() {
+        dataSource();
+        return DB.getJdbcUrl();
+    }
+
+    /** @return the container's user name */
+    static String username() {
+        dataSource();
+        return DB.getUsername();
+    }
+
+    /** @return the container's password */
+    static String password() {
+        dataSource();
+        return DB.getPassword();
     }
 }

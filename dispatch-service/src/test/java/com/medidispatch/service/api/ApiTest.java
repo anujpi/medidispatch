@@ -2,9 +2,11 @@ package com.medidispatch.service.api;
 
 import com.jayway.jsonpath.JsonPath;
 import com.medidispatch.service.DispatchService;
+import com.medidispatch.service.persistence.TestDatabaseConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -30,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(TestDatabaseConfig.class)
 class ApiTest {
 
     @Autowired

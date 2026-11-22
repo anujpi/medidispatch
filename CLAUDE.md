@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (663 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 56 in dispatch-service)
+## Built so far (686 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 79 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -378,10 +378,11 @@ everyone's update.
   the 2 km unit not the 20 km one, ST_Distance about 2000 m. Harmless Flyway warning: extension "timescaledb" already
   exists (this image pre-creates it).
 
-## Database adapters (IN PROGRESS: 3a done, 3b and 3c to go), package com.medidispatch.service.persistence
-Split into 3 pieces. 3a (DONE): patients, units, claimer. 3b: cases, queue, vitals on JDBC (F) + trips on JPA (L).
-3c: EngineConfig switches to the adapters, each DispatchService call one transaction INSIDE the lock, all Spring tests
-on Postgres.
+## Database adapters (IN PROGRESS: 3a and 3b done, 3c and 3d to go), package com.medidispatch.service.persistence
+Pieces (re-ordered because the JPA starter makes Boot connect to the database at startup): 3a (DONE) patients, units,
+claimer on JDBC. 3b (DONE) the app connects + migrates at startup, trips on JPA. 3c: cases, queue (FOR UPDATE SKIP
+LOCKED), vitals on JDBC (F). 3d: EngineConfig switches to the adapters, each DispatchService call one transaction
+INSIDE the lock (L). Until 3d the ENGINE still runs in memory; the database is only connected and migrated.
 Decisions: JdbcClient + hand-written SQL for the engine's ports; JPA (separate TripEntity + mapper, Spring Data
 method-name queries, saveAndFlush so SQL runs at save() like JDBC, ddl-auto=validate because Flyway owns the schema)
 only for AssignmentRepository and later users/roles; static restore(...) in core; service always on Postgres (in-memory
@@ -396,8 +397,14 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   lastSeenAt, lastMovedAt) (null times = never), Assignment.restore(id, caseId, resourceId, role, status, assignedAt)
   (Assignment now has one private constructor with all checks; the public one passes a random UUID and ASSIGNED);
   Resource.movedFrom() getter added. Restored objects obey the state machines as usual (tested).
-- pom: spring-jdbc (plain library, main scope; NOT the Boot starter, which would auto-create a DataSource while the
-  app still runs in memory). Flyway, driver, Testcontainers still test scope until 3c.
+- pom (since 3b): spring-boot-starter-data-jpa (Hibernate, Spring Data JPA, JDBC/JdbcClient, HikariCP),
+  spring-boot-starter-flyway (Boot 4 needs the starter: flyway-core alone no longer runs at startup),
+  flyway-database-postgresql, postgresql (runtime); test: spring-boot-starter-data-jpa-test, testcontainers-postgresql.
+  (3a used plain spring-jdbc so Boot would not create a DataSource yet; replaced.)
+- application.properties: spring.datasource.url/username/password = ${DB_URL:...}/${DB_USERNAME:medidispatch}/
+  ${DB_PASSWORD:medidispatch} (env vars, local compose defaults; ponytail: drop the defaults with the full-stack
+  compose, flagged by a security review), spring.jpa.hibernate.ddl-auto=validate, spring.jpa.open-in-view=false.
+  Running the app now needs `docker compose up -d` first (connection refused otherwise).
 - DbTime: Instant <-> OffsetDateTime at UTC (the driver's type for timestamptz), null stays null; Postgres keeps
   microseconds.
 - JdbcPatientRepository: upsert (INSERT ... ON CONFLICT (id) DO UPDATE SET home = excluded.home); reads ST_Y = lat,
@@ -417,9 +424,32 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   saving leaves the claim alone, radius/status/type filters, nearest then id, assigned search, findAll, and
   givesTheSameAnswersAsTheInMemoryRepository: 60 random units, seed 42, same ids in the same order from 4 centers),
   JdbcResourceClaimerTest (11, including 20 threads on separate connections, exactly one wins).
+- JPA (3b): TripEntity (@Entity @Table("assignments"), no @Column: Boot's naming turns caseId into case_id; unitId =
+  domain resourceId; @Enumerated(STRING); Instant -> timestamptz by itself; protected no-arg constructor, not final;
+  static from(Assignment) / toAssignment() via Assignment.restore). TripJpaRepository (public interface extends
+  JpaRepository<TripEntity, String>, derived queries findByCaseIdAndStatusInOrderByAssignedAtAscIdAsc,
+  findByUnitIdAndStatusIn (Optional: the DB index allows at most one), findByStatusInOrderByAssignedAtAscIdAsc).
+  JpaAssignmentRepository (public, implements the port): saveAndFlush (SQL at save(), like JDBC; a second active trip
+  for a unit throws DataIntegrityViolationException at that line), maps to domain at once (no managed entity leaves),
+  ACTIVE = statuses with !isTerminal(), findActive now ordered assigned_at then id. ponytail: domain-chosen ids, so
+  every save is SELECT then INSERT/UPDATE (merge); Persistable if it matters.
+- Test wiring (3b): TestDatabaseConfig (public @TestConfiguration(proxyBeanMethods = false)) with a
+  DynamicPropertyRegistrar bean setting spring.datasource.* from TestDatabase.url()/username()/password() (each first
+  starts + migrates the container): ONE container for plain and Spring tests (no @ServiceConnection, which would start
+  a second). EVERY Spring test that starts Boot needs @Import(TestDatabaseConfig.class) (ApiTest, LiveFeedTest,
+  EngineConfigTest; forgetting it = "Failed to load ApplicationContext"). Spring's Flyway re-runs at context start and
+  finds V1 applied. DispatchServiceTest (AnnotationConfigApplicationContext, no Boot) is unaffected.
+  TestDatabase.openCase(JdbcClient, id) inserts through a given client.
+- JpaAssignmentRepositoryTest (23): @DataJpaTest (org.springframework.boot.data.jpa.test.autoconfigure) +
+  @AutoConfigureTestDatabase(replace = NONE) (org.springframework.boot.jdbc.test.autoconfigure) +
+  @Import(TestDatabaseConfig.class). Each test is rolled back; @BeforeAll TestDatabase.reset() once (JDBC tests leave
+  rows committed); @BeforeEach inserts cases c1-c4 and units through JdbcClient.create(Spring's DataSource), which joins
+  the test transaction. Mirrors InMemoryAssignmentRepositoryTest (compares by id: restored objects are new objects)
+  plus every field round-trips, demotion saved, second active trip refused at save, findActive ordering. The slice
+  prints Hibernate SQL (select-then-insert visible).
 
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3b (JDBC for cases, the queue with FOR UPDATE SKIP
-LOCKED, vitals; JPA for trips, starting with the JPA lesson), then 3c (the switch-over). Then hospitals, the simulator
-over HTTP.
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3c (JDBC for cases, the queue with FOR UPDATE SKIP
+LOCKED, vitals; F, with the SKIP LOCKED explanation), then 3d (the switch-over, transactions inside the lock; L). Then
+hospitals, the simulator over HTTP.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
