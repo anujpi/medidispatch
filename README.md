@@ -252,7 +252,9 @@ The first database adapters are done: patients, units (with the nearby search) a
 
 Trips use JPA (Hibernate with Spring Data), next to plain SQL for the rest: trips are a flat table with simple lookups, which Spring Data writes from the method name alone (`findByUnitIdAndStatusIn`), while the claim, the queue and the map searches need SQL written by hand. The two share one database connection pool and one transaction manager. The service now connects to the database at startup and Flyway brings the schema up to date; the engine itself still keeps its state in memory until the last adapters are in.
 
-Next: the adapters for cases, the dispatch queue and vitals, then switching the engine over to the database. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+Cases, the dispatch queue and vitals have their database adapters too, so every part the engine stores now has one. The queue is a flag on the case itself, and taking the most urgent case is a single statement that also locks it, with `FOR UPDATE SKIP LOCKED`: a second worker asking at the same moment gets the next case at once instead of waiting or getting the same one, which a test shows with two connections. Every vitals reading is kept (the history is what a future model would learn from); a missing measurement stays missing rather than turning into 0.
+
+Next: switching the engine over to the database, with each request as one all-or-nothing transaction. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -290,7 +292,8 @@ Next: the adapters for cases, the dispatch queue and vitals, then switching the 
 - [x] Database schema: Postgres + PostGIS + TimescaleDB, Flyway, tested with Testcontainers
 - [x] Database adapters for patients, units (nearby search) and claims
 - [x] Trips on JPA; the service connects to the database and migrates it at startup
-- [ ] Database adapters for cases, the queue and vitals, the engine running on Postgres
+- [x] Database adapters for cases, the dispatch queue and vitals
+- [ ] The engine running on Postgres (one transaction per request)
 - [ ] Hospitals: registry, destination choice, pre-alert
 - [ ] The simulator driving the running service over HTTP
 - [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
@@ -399,7 +402,8 @@ medidispatch/
       live/                   LiveFeed (server-sent events: the whole picture every second)
       persistence/            database adapters: JdbcPatientRepository, JdbcResourceRepository,
                               JdbcResourceClaimer, DbTime (plain SQL); JpaAssignmentRepository, TripEntity,
-                              TripJpaRepository (JPA); more to come
+                              TripJpaRepository (JPA); JdbcCaseRepository, JdbcCaseQueue,
+                              JdbcVitalsRepository (plain SQL)
     src/main/resources/db/migration/
                               V1__init.sql (the database schema, applied by Flyway)
   BACKLOG.md                  known gaps to tackle later
@@ -427,7 +431,8 @@ Every component is covered by tests, including:
 - a live-feed test over a real network connection: a real server on a random port and Java's HTTP client reading the stream line by line as it arrives, checking that the first picture comes at once and that a new unit shows up in a later message,
 - database schema tests on a real Postgres in Docker (Testcontainers): two connections race to claim one ambulance and the second waits on the row lock, then loses; the database refuses a second open case, a second active trip, an unknown status and a duplicate reading; a unit 2 km away is found within 5 km and one 20 km away is not,
 - database adapter tests on the same real database: every field survives the round trip, saving a unit never undoes its claim, 20 threads race for one ambulance and exactly one wins, and the database search gives the same units in the same order as the in-memory one for a random fleet of 60,
-- JPA tests for trips (a Spring "slice" that starts only the database layer, each test rolled back): every lookup the engine uses, and a second active trip for one ambulance refused by the database at the moment it is saved.
+- JPA tests for trips (a Spring "slice" that starts only the database layer, each test rolled back): every lookup the engine uses, and a second active trip for one ambulance refused by the database at the moment it is saved,
+- queue, case and vitals adapter tests: the same ordering as the in-memory queue, a case that was never saved cannot be queued, saving a case never takes it out of the queue, two workers taking cases at the same moment get different ones without waiting, a second open case for one patient is refused, and missing measurements come back as missing.
 
 Planned: the whole service test suite running on Postgres, and simulator-driven load tests.
 

@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (686 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 79 in dispatch-service)
+## Built so far (731 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 124 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -378,10 +378,10 @@ everyone's update.
   the 2 km unit not the 20 km one, ST_Distance about 2000 m. Harmless Flyway warning: extension "timescaledb" already
   exists (this image pre-creates it).
 
-## Database adapters (IN PROGRESS: 3a and 3b done, 3c and 3d to go), package com.medidispatch.service.persistence
+## Database adapters (IN PROGRESS: 3a, 3b, 3c done, 3d to go), package com.medidispatch.service.persistence
 Pieces (re-ordered because the JPA starter makes Boot connect to the database at startup): 3a (DONE) patients, units,
-claimer on JDBC. 3b (DONE) the app connects + migrates at startup, trips on JPA. 3c: cases, queue (FOR UPDATE SKIP
-LOCKED), vitals on JDBC (F). 3d: EngineConfig switches to the adapters, each DispatchService call one transaction
+claimer on JDBC. 3b (DONE) the app connects + migrates at startup, trips on JPA. 3c (DONE): cases, queue (FOR UPDATE
+SKIP LOCKED), vitals on JDBC (F). Every port now has a database adapter (EventPublisher stays in memory by decision). 3d: EngineConfig switches to the adapters, each DispatchService call one transaction
 INSIDE the lock (L). Until 3d the ENGINE still runs in memory; the database is only connected and migrated.
 Decisions: JdbcClient + hand-written SQL for the engine's ports; JPA (separate TripEntity + mapper, Spring Data
 method-name queries, saveAndFlush so SQL runs at save() like JDBC, ddl-auto=validate because Flyway owns the schema)
@@ -447,9 +447,32 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   the test transaction. Mirrors InMemoryAssignmentRepositoryTest (compares by id: restored objects are new objects)
   plus every field round-trips, demotion saved, second active trip refused at save, findActive ordering. The slice
   prints Hibernate SQL (select-then-insert visible).
+- JdbcCaseRepository (3c): upsert of every column EXCEPT queued; findOpenByPatientId / findOpen use the LITERAL
+  `status NOT IN ('CLOSED', 'CANCELLED')`, word for word like the partial index (with ? parameters Postgres cannot
+  always prove a partial index applies once the driver reuses a prepared plan); findOpen ORDER BY opened_at, id; a
+  second open case for a patient -> DuplicateKeyException. static toCase(rs) is package-private, shared with the queue.
+- JdbcCaseQueue (3c): enqueue = UPDATE SET queued = true, 0 rows (case never saved) -> IllegalStateException (never
+  silently lose an emergency); remove = UPDATE ... WHERE id AND queued (rows == 1); size = count(*) WHERE queued;
+  peekNext = the same order without locking; pollNext = ONE statement: UPDATE cases SET queued = false WHERE id =
+  (SELECT id ... WHERE queued ORDER BY <CRITICAL 0, HIGH 1, MEDIUM 2, else 3>, opened_at, id LIMIT 1 FOR UPDATE SKIP
+  LOCKED) RETURNING the case. SKIP LOCKED: a second worker takes the next case instead of waiting; without it, it would
+  wait, re-check, find the row no longer queued and return NOTHING (LIMIT 1). Difference from memory: ranks by the band
+  saved now (memory kept a snapshot per entry); the engine always re-queues on a band change. ponytail: band order is
+  spelled out in SQL (BAND_RANK); a new band needs a migration anyway.
+- JdbcVitalsRepository (3c): INSERT ... ON CONFLICT (patient_id, at) DO NOTHING (a repeat is ignored, like memory);
+  nullable measurements bound with Types.INTEGER / DOUBLE and read with getObject(..., Integer.class) (getInt would
+  turn a missing value into 0); latestFor ORDER BY at DESC LIMIT 1; every reading is kept (memory kept only the latest).
+  ponytail: one INSERT per reading, batch when a load test needs it.
+- Tests (3c): JdbcCaseRepositoryTest (15; the in-memory "closed without saving drops out" quirk is inverted: only
+  what was saved counts), JdbcCaseQueueTest (22: mirrored, the snapshot test replaced by theQueueRanksByTheSavedBand,
+  never-saved case refused, savingACaseLeavesItQueued (CaseManager's order: enqueue, then save), and the SKIP LOCKED
+  race: worker A polls on a SingleConnectionDataSource with auto-commit off (holds "first"), worker B polls at once and
+  gets "second" without waiting; @Timeout(10, SEPARATE_THREAD) because a blocked JDBC call is not interruptible),
+  JdbcVitalsRepositoryTest (8: mirrored + nulls stay null, a repeat ignored, every reading kept).
 
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3c (JDBC for cases, the queue with FOR UPDATE SKIP
-LOCKED, vitals; F, with the SKIP LOCKED explanation), then 3d (the switch-over, transactions inside the lock; L). Then
-hospitals, the simulator over HTTP.
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3d (L): EngineConfig builds the Jdbc/Jpa adapters,
+each DispatchService call one transaction INSIDE the lock (TransactionTemplate), the whole Spring suite on Postgres
+(DispatchServiceTest will need the database too). Then tick PLAN's adapters box. Then hospitals, the simulator over
+HTTP.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
