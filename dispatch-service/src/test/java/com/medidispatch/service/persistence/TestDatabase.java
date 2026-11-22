@@ -35,7 +35,7 @@ public final class TestDatabase {
             DockerImageName.parse("timescale/timescaledb-ha:pg17").asCompatibleSubstituteFor("postgres"));
 
     /** TRUNCATE takes every table at once, which satisfies the foreign keys; the schema stays. */
-    private static final String TRUNCATE_ALL = "TRUNCATE vitals, assignments, units, cases, patients";
+    private static final String TRUNCATE_ALL = "TRUNCATE vitals, assignments, units, cases, patients, facilities";
 
     private static DataSource dataSource;
     private static DataSource appDataSource;

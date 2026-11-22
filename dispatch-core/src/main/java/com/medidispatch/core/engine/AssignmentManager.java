@@ -3,6 +3,7 @@ package com.medidispatch.core.engine;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.event.AssignmentRoleChanged;
@@ -13,6 +14,7 @@ import com.medidispatch.core.port.ResourceClaimer;
 import com.medidispatch.core.port.ResourceRepository;
 
 import java.time.Clock;
+import java.util.Set;
 
 /**
  * Moves a trip through its lifecycle and cleans up when it ends.
@@ -95,15 +97,16 @@ public class AssignmentManager {
      *
      * @param assignmentId the trip that moves
      * @param hospitalId   the hospital the patient is taken to
+     * @param needs        the specialist services the patient needs; empty means nothing special
      * @return the updated trip
-     * @throws IllegalArgumentException if an argument is blank
+     * @throws IllegalArgumentException if an id is blank or {@code needs} is missing
      * @throws IllegalStateException    if there is no such trip, it is not the main (PRIMARY) trip, or it is not
      *                                  ARRIVED
      */
-    public Assignment startTransport(String assignmentId, String hospitalId) {
+    public Assignment startTransport(String assignmentId, String hospitalId, Set<Capability> needs) {
         Assignment a = find(assignmentId);
         AssignmentStatus from = a.status();
-        a.startTransport(hospitalId);                        // refuses before anything changes
+        a.startTransport(hospitalId, needs);                        // refuses before anything changes
         assignments.save(a);
         publisher.publish(new AssignmentStatusChanged(
                 a.id(), a.caseId(), a.resourceId(), from, a.status(), clock.instant()));

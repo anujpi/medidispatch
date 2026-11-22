@@ -15,7 +15,7 @@ import java.util.Set;
  * Starts the second leg of a trip: the crew on scene takes the patient to a hospital.
  * <p>
  * One call does it all: checks the trip may transport, chooses the hospital ({@link DestinationChooser}) from where
- * the unit is now, moves the case to TRANSPORTING and the trip to TRANSPORTING with that hospital. Every check runs
+ * the unit is now, moves the case to TRANSPORTING and the trip to TRANSPORTING with that hospital and the needs. Every check runs
  * before anything changes, so a refusal leaves the trip and the case exactly as they were. Finishing the transport
  * is the usual {@link AssignmentManager#complete(String)}, then stabilise and close the case.
  */
@@ -87,6 +87,6 @@ public class TransportCoordinator {
         // The case first: it is the only step that can still fail, and then the trip is untouched. The trip was
         // checked above, so moving it cannot fail.
         caseManager.onTransporting(trip.caseId());
-        return assignmentManager.startTransport(tripId, hospital.id());
+        return assignmentManager.startTransport(tripId, hospital.id(), needed);
     }
 }

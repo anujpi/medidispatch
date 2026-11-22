@@ -2,6 +2,7 @@ package com.medidispatch.core.domain;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -12,7 +13,7 @@ import java.util.UUID;
  * {@link AssignmentRole#PRIMARY} trip and, alongside it, a {@link AssignmentRole#SUPPORT} trip. A PRIMARY trip can
  * become SUPPORT once, when a more capable unit is needed ({@link #demoteToSupport()}).
  * <p>
- * The main trip can go on to carry the patient to a hospital: {@link #startTransport(String)} is the only way into
+ * The main trip can go on to carry the patient to a hospital: {@link #startTransport(String, Set)} is the only way into
  * {@link AssignmentStatus#TRANSPORTING}, so a transporting trip always knows its hospital.
  */
 public class Assignment {
@@ -24,6 +25,7 @@ public class Assignment {
     private final Instant assignedAt;
     private AssignmentStatus status;
     private String hospitalId;
+    private Set<Capability> needs = Set.of();
 
     /**
      * Creates a new trip in {@link AssignmentStatus#ASSIGNED}, with a new random id.
@@ -35,7 +37,8 @@ public class Assignment {
      * @throws IllegalArgumentException if an id is blank or any argument is missing
      */
     public Assignment(String caseId, String resourceId, AssignmentRole role, Instant assignedAt) {
-        this(UUID.randomUUID().toString(), caseId, resourceId, role, AssignmentStatus.ASSIGNED, assignedAt, null);
+        this(UUID.randomUUID().toString(), caseId, resourceId, role, AssignmentStatus.ASSIGNED, assignedAt, null,
+                Set.of());
     }
 
     /**
@@ -52,18 +55,20 @@ public class Assignment {
      * @param status     its saved status
      * @param assignedAt when the unit was assigned
      * @param hospitalId the hospital the patient is (or was) taken to; {@code null} if there was no transport
+     * @param needs      the specialist services the crew said the patient needs; empty if none or no transport
      * @return the rebuilt trip
-     * @throws IllegalArgumentException if an id is blank, a required argument is missing, or a TRANSPORTING trip
-     *                                  has no hospital
+     * @throws IllegalArgumentException if an id is blank, a required argument is missing, {@code needs} contains
+     *                                  {@code null}, or a TRANSPORTING trip has no hospital
      */
     public static Assignment restore(String id, String caseId, String resourceId, AssignmentRole role,
-                                     AssignmentStatus status, Instant assignedAt, String hospitalId) {
-        return new Assignment(id, caseId, resourceId, role, status, assignedAt, hospitalId);
+                                     AssignmentStatus status, Instant assignedAt, String hospitalId,
+                                     Set<Capability> needs) {
+        return new Assignment(id, caseId, resourceId, role, status, assignedAt, hospitalId, needs);
     }
 
     // Both ways in (new trip, restored trip) end here, so the checks live in one place.
     private Assignment(String id, String caseId, String resourceId, AssignmentRole role,
-                       AssignmentStatus status, Instant assignedAt, String hospitalId) {
+                       AssignmentStatus status, Instant assignedAt, String hospitalId, Set<Capability> needs) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("id is required");
         }
@@ -85,6 +90,7 @@ public class Assignment {
         if (hospitalId != null && hospitalId.isBlank()) {
             throw new IllegalArgumentException("hospitalId cannot be blank");
         }
+        requireNoNulls(needs);
         // A damaged stored row fails here, when it is read, not later on the hospital screen.
         if (status == AssignmentStatus.TRANSPORTING && hospitalId == null) {
             throw new IllegalArgumentException("a TRANSPORTING trip needs a hospital");
@@ -96,6 +102,19 @@ public class Assignment {
         this.status = status;
         this.assignedAt = assignedAt;
         this.hospitalId = hospitalId;
+        this.needs = Set.copyOf(needs);
+    }
+
+    // IAE, not the NullPointerException Set.copyOf would throw: bad input in the core is always an IAE.
+    private static void requireNoNulls(Set<Capability> needs) {
+        if (needs == null) {
+            throw new IllegalArgumentException("needs is required (empty means nothing special)");
+        }
+        for (Capability c : needs) {
+            if (c == null) {
+                throw new IllegalArgumentException("needs cannot contain null");
+            }
+        }
     }
 
     /**
@@ -104,7 +123,7 @@ public class Assignment {
      * @param next the status to move to
      * @throws IllegalArgumentException if {@code next} is missing
      * @throws IllegalStateException    if the move is not allowed, or {@code next} is TRANSPORTING (use
-     *                                  {@link #startTransport(String)}); the status is left unchanged
+     *                                  {@link #startTransport(String, Set)}); the status is left unchanged
      * @see AssignmentStatus#canTransitionTo(AssignmentStatus)
      */
     public void transitionTo(AssignmentStatus next) {
@@ -142,17 +161,21 @@ public class Assignment {
     }
 
     /**
-     * The crew sets off for a hospital with the patient: ARRIVED to TRANSPORTING, and the trip records where to.
+     * The crew sets off for a hospital with the patient: ARRIVED to TRANSPORTING. The trip records where to and
+     * what the patient needs, for the hospital's pre-alert.
      *
      * @param hospitalId the hospital the patient is taken to; never blank
-     * @throws IllegalArgumentException if {@code hospitalId} is blank
+     * @param needs      the specialist services the patient needs; empty means nothing special
+     * @throws IllegalArgumentException if {@code hospitalId} is blank or {@code needs} is missing or contains
+     *                                  {@code null}
      * @throws IllegalStateException    if this is not the main (PRIMARY) trip or it is not ARRIVED; nothing is
      *                                  changed
      */
-    public void startTransport(String hospitalId) {
+    public void startTransport(String hospitalId, Set<Capability> needs) {
         if (hospitalId == null || hospitalId.isBlank()) {
             throw new IllegalArgumentException("hospitalId is required");
         }
+        requireNoNulls(needs);
         if (role != AssignmentRole.PRIMARY) {
             throw new IllegalStateException("Only the main unit transports; trip " + id + " is " + role);
         }
@@ -161,6 +184,7 @@ public class Assignment {
         }
         status = AssignmentStatus.TRANSPORTING;
         this.hospitalId = hospitalId;
+        this.needs = Set.copyOf(needs);
     }
 
     public String id()                { return id; }
@@ -172,4 +196,7 @@ public class Assignment {
 
     /** The hospital the patient is (or was) taken to; empty if the trip never went to TRANSPORTING. */
     public Optional<String> hospitalId() { return Optional.ofNullable(hospitalId); }
+
+    /** What the crew said the patient needs when transport started (an unmodifiable set); empty before that. */
+    public Set<Capability> needs() { return needs; }
 }

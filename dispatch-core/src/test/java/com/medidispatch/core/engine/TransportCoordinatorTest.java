@@ -121,6 +121,7 @@ public class TransportCoordinatorTest {
 
         assertEquals(AssignmentStatus.TRANSPORTING, moving.status());
         assertEquals("h-apollo", trip(a).hospitalId().orElseThrow());
+        assertEquals(STROKE, trip(a).needs());
         assertEquals(CaseStatus.TRANSPORTING, reload(c).status());
         assertEquals(ResourceStatus.ASSIGNED, resources.findById("amb-7").orElseThrow().status());
         assertEquals(c.id(), claimer.claimedBy("amb-7").orElseThrow());

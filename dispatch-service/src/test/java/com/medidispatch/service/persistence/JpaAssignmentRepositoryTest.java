@@ -3,6 +3,8 @@ package com.medidispatch.service.persistence;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Capability;
+import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceType;
@@ -21,6 +23,7 @@ import javax.sql.DataSource;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -101,7 +104,7 @@ class JpaAssignmentRepositoryTest {
     /** Every field round-trips, including the kept id, a SUPPORT role and the exact time. */
     @Test
     void everyFieldComesBack() {
-        Assignment a = Assignment.restore("t1", "c1", "nurse", AssignmentRole.SUPPORT, AssignmentStatus.ARRIVED, ASSIGNED_AT, null);
+        Assignment a = Assignment.restore("t1", "c1", "nurse", AssignmentRole.SUPPORT, AssignmentStatus.ARRIVED, ASSIGNED_AT, null, Set.of());
         repo.save(a);
 
         Assignment found = repo.findById("t1").orElseThrow();
@@ -111,6 +114,47 @@ class JpaAssignmentRepositoryTest {
         assertEquals(AssignmentRole.SUPPORT, found.role());
         assertEquals(AssignmentStatus.ARRIVED, found.status());
         assertEquals(ASSIGNED_AT, found.assignedAt());
+    }
+
+    // ---- the transport leg (V2: hospital_id and needs) ----
+
+    /** The hospital and the needs (a text[] column, mapped by Hibernate from a String[]) come back with the trip. */
+    @Test
+    void aTransportKeepsItsHospitalAndNeeds() {
+        saveHospital("h-apollo");
+        Assignment a = arrivedTrip("c1", "u1");
+
+        a.startTransport("h-apollo", Set.of(Capability.STROKE, Capability.CARDIAC));
+        repo.save(a);
+
+        Assignment found = repo.findById(a.id()).orElseThrow();
+        assertEquals(AssignmentStatus.TRANSPORTING, found.status());
+        assertEquals("h-apollo", found.hospitalId().orElseThrow());
+        assertEquals(Set.of(Capability.STROKE, Capability.CARDIAC), found.needs());
+    }
+
+    /** A trip that never transported has no hospital and an empty (not NULL) needs array. */
+    @Test
+    void aTripWithoutTransportHasNoHospitalAndNoNeeds() {
+        Assignment a = trip("c1", "u1");
+        repo.save(a);
+
+        Assignment found = repo.findById(a.id()).orElseThrow();
+        assertTrue(found.hospitalId().isEmpty());
+        assertTrue(found.needs().isEmpty());
+    }
+
+    /** TRANSPORTING is not terminal, so the trip still counts as active for the case and for the unit. */
+    @Test
+    void aTransportingTripIsStillActive() {
+        saveHospital("h-apollo");
+        Assignment a = arrivedTrip("c1", "u1");
+        a.startTransport("h-apollo", Set.of());
+        repo.save(a);
+
+        assertEquals(a.id(), repo.findActiveByResourceId("u1").orElseThrow().id());
+        assertEquals(1, repo.findActiveByCaseId("c1").size());
+        assertEquals(1, repo.findActive().size());
     }
 
     @Test
@@ -303,10 +347,10 @@ class JpaAssignmentRepositoryTest {
     /** New with the database: a fixed order, oldest first, then by id (in memory it was HashMap order). */
     @Test
     void findActiveIsOldestFirstThenById() {
-        Assignment late = Assignment.restore("t-late", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.EN_ROUTE, ASSIGNED_AT.plusSeconds(60), null);
-        Assignment early = Assignment.restore("t-early", "c2", "u2", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null);
-        Assignment sameTimeB = Assignment.restore("t-b", "c3", "u3", AssignmentRole.PRIMARY, AssignmentStatus.ARRIVED, ASSIGNED_AT.plusSeconds(30), null);
-        Assignment sameTimeA = Assignment.restore("t-a", "c4", "u4", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT.plusSeconds(30), null);
+        Assignment late = Assignment.restore("t-late", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.EN_ROUTE, ASSIGNED_AT.plusSeconds(60), null, Set.of());
+        Assignment early = Assignment.restore("t-early", "c2", "u2", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null, Set.of());
+        Assignment sameTimeB = Assignment.restore("t-b", "c3", "u3", AssignmentRole.PRIMARY, AssignmentStatus.ARRIVED, ASSIGNED_AT.plusSeconds(30), null, Set.of());
+        Assignment sameTimeA = Assignment.restore("t-a", "c4", "u4", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT.plusSeconds(30), null, Set.of());
         repo.save(late);
         repo.save(early);
         repo.save(sameTimeB);
@@ -339,6 +383,20 @@ class JpaAssignmentRepositoryTest {
     /** A new PRIMARY trip (random id, ASSIGNED). */
     private static Assignment trip(String caseId, String unitId) {
         return new Assignment(caseId, unitId, AssignmentRole.PRIMARY, ASSIGNED_AT);
+    }
+
+    /** A main trip already en route and arrived, not saved yet. */
+    private static Assignment arrivedTrip(String caseId, String unitId) {
+        Assignment a = trip(caseId, unitId);
+        a.transitionTo(AssignmentStatus.EN_ROUTE);
+        a.transitionTo(AssignmentStatus.ARRIVED);
+        return a;
+    }
+
+    /** assignments.hospital_id references facilities, so the hospital must exist (rolled back with the test). */
+    private void saveHospital(String id) {
+        new JdbcFacilityRepository(JdbcClient.create(dataSource))
+                .save(Facility.hospital(id, "Hospital " + id, DELHI, Set.of(Capability.STROKE), true));
     }
 
     /** Takes a trip through its normal ending: en route, arrived, done. */

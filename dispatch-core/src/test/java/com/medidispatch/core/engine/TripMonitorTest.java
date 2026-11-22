@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -260,7 +261,7 @@ public class TripMonitorTest {
         Assignment a = enRouteTrip(c);
         assignmentManager.onArrived(tripOf(c.id()));
         caseManager.onTransporting(c.id());
-        assignmentManager.startTransport(tripOf(c.id()), "h-apollo");
+        assignmentManager.startTransport(tripOf(c.id()), "h-apollo", Set.of());
 
         clock.advance(Duration.ofMinutes(10));                        // silent far past both timeouts
 

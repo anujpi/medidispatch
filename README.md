@@ -261,7 +261,9 @@ Cases, the dispatch queue and vitals have their database adapters too, so every 
 
 The trip's second leg works in the engine too. When the crew decides the patient needs hospital care, they say what is needed (for example a stroke unit) and the engine picks the hospital from where the ambulance is and records it on the trip; the ambulance stays busy until the handover, and is then free again as after any trip. Only the main ambulance can carry a patient, never a nurse or a first responder, and while the patient is on board the ambulance can never be taken for another case.
 
-Next: the hospital endpoints and the database for all of this, then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+The database knows about hospitals too. A new migration adds the facilities table, each unit's base, and the trip's hospital and needs, without touching the existing data. The database enforces the same rules as the code: a clinic can never accept patients, a transport always has a hospital, and an ambulance carrying a patient can never be given a second trip.
+
+Next: the hospital endpoints, then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 

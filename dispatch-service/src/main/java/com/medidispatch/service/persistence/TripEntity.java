@@ -3,6 +3,7 @@ package com.medidispatch.service.persistence;
 import com.medidispatch.core.domain.Assignment;
 import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
+import com.medidispatch.core.domain.Capability;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -10,6 +11,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * One row of {@code assignments} as a JPA entity: Hibernate maps it to the table and writes the SQL.
@@ -45,6 +48,12 @@ public class TripEntity {
 
     private Instant assignedAt;
 
+    /** NULL until the trip goes to TRANSPORTING. */
+    private String hospitalId;
+
+    /** A {@code text[]} column; Hibernate maps a Java array to a Postgres array by itself. */
+    private String[] needs;
+
     /** Hibernate creates entities through a no-argument constructor (and the class must not be final). */
     protected TripEntity() {
     }
@@ -61,6 +70,8 @@ public class TripEntity {
         e.role = a.role();
         e.status = a.status();
         e.assignedAt = a.assignedAt();
+        e.hospitalId = a.hospitalId().orElse(null);
+        e.needs = JdbcFacilityRepository.toNames(a.needs());
         return e;
     }
 
@@ -68,7 +79,10 @@ public class TripEntity {
      * @return the domain trip this row stands for, rebuilt with {@link Assignment#restore}
      */
     Assignment toAssignment() {
-        // ponytail: no hospital yet; the assignments.hospital_id column arrives with the V2 migration (H3).
-        return Assignment.restore(id, caseId, unitId, role, status, assignedAt, null);
+        Set<Capability> needed = EnumSet.noneOf(Capability.class);
+        for (String name : needs) {
+            needed.add(Capability.valueOf(name));
+        }
+        return Assignment.restore(id, caseId, unitId, role, status, assignedAt, hospitalId, needed);
     }
 }

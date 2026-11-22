@@ -3,6 +3,8 @@ package com.medidispatch.core.domain;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -182,7 +184,7 @@ public class AssignmentTest {
     /** restore keeps the saved id (no new random one), role and status. */
     @Test
     void restoreRebuildsEveryField() {
-        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.SUPPORT, AssignmentStatus.EN_ROUTE, ASSIGNED_AT, null);
+        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.SUPPORT, AssignmentStatus.EN_ROUTE, ASSIGNED_AT, null, Set.of());
 
         assertEquals("t1", a.id());
         assertEquals("c1", a.caseId());
@@ -195,7 +197,7 @@ public class AssignmentTest {
     /** A restored trip still obeys its rules: a finished trip cannot restart or be demoted. */
     @Test
     void aRestoredTripStillObeysTheRules() {
-        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT, null);
+        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT, null, Set.of());
 
         assertThrows(IllegalStateException.class, () -> a.transitionTo(AssignmentStatus.EN_ROUTE));
         assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
@@ -207,13 +209,13 @@ public class AssignmentTest {
     @Test
     void restoreRejectsMissingValues() {
         assertThrows(IllegalArgumentException.class,
-                () -> Assignment.restore(" ", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null));
+                () -> Assignment.restore(" ", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null, Set.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, null, ASSIGNED_AT, null));
+                () -> Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, null, ASSIGNED_AT, null, Set.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> Assignment.restore("t1", "c1", "u1", null, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null));
+                () -> Assignment.restore("t1", "c1", "u1", null, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null, Set.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> Assignment.restore("t1", "", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null));
+                () -> Assignment.restore("t1", "", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null, Set.of()));
     }
 
     // ---- transport: the second leg, scene to hospital ----
@@ -231,20 +233,51 @@ public class AssignmentTest {
     }
 
     @Test
-    void startTransportMovesToTransportingAndRecordsTheHospital() {
+    void startTransportMovesToTransportingAndRecordsTheHospitalAndNeeds() {
         Assignment a = arrived(AssignmentRole.PRIMARY);
 
-        a.startTransport("h-apollo");
+        a.startTransport("h-apollo", Set.of(Capability.STROKE));
 
         assertEquals(AssignmentStatus.TRANSPORTING, a.status());
         assertEquals("h-apollo", a.hospitalId().orElseThrow());
+        assertEquals(Set.of(Capability.STROKE), a.needs());
+    }
+
+    @Test
+    void aNewTripNeedsNothing() {
+        assertTrue(newAssignment().needs().isEmpty());
+    }
+
+    /** The needs are copied: changing the caller's set later changes nothing, and the copy cannot be changed. */
+    @Test
+    void needsAreAnUnmodifiableCopy() {
+        Assignment a = arrived(AssignmentRole.PRIMARY);
+        Set<Capability> given = new HashSet<>(Set.of(Capability.TRAUMA));
+
+        a.startTransport("h-apollo", given);
+        given.add(Capability.PAEDIATRIC);
+
+        assertEquals(Set.of(Capability.TRAUMA), a.needs());
+        assertThrows(UnsupportedOperationException.class, () -> a.needs().add(Capability.CARDIAC));
+    }
+
+    @Test
+    void missingOrNullNeedsAreRejectedAndNothingChanges() {
+        Assignment a = arrived(AssignmentRole.PRIMARY);
+        Set<Capability> withNull = new HashSet<>();
+        withNull.add(null);
+
+        assertThrows(IllegalArgumentException.class, () -> a.startTransport("h-apollo", null));
+        assertThrows(IllegalArgumentException.class, () -> a.startTransport("h-apollo", withNull));
+        assertEquals(AssignmentStatus.ARRIVED, a.status());
+        assertTrue(a.hospitalId().isEmpty());
     }
 
     /** The hospital stays on the trip after it ends: the record says where the patient went. */
     @Test
     void theHospitalIsKeptWhenTheTripIsDone() {
         Assignment a = arrived(AssignmentRole.PRIMARY);
-        a.startTransport("h-apollo");
+        a.startTransport("h-apollo", Set.of());
 
         a.transitionTo(AssignmentStatus.DONE);
 
@@ -255,7 +288,7 @@ public class AssignmentTest {
     void aFirstResponderCannotTransport() {
         Assignment a = arrived(AssignmentRole.SUPPORT);
 
-        assertThrows(IllegalStateException.class, () -> a.startTransport("h-apollo"));
+        assertThrows(IllegalStateException.class, () -> a.startTransport("h-apollo", Set.of()));
         assertEquals(AssignmentStatus.ARRIVED, a.status());
         assertTrue(a.hospitalId().isEmpty());
     }
@@ -264,7 +297,7 @@ public class AssignmentTest {
     void onlyAnArrivedTripCanTransport() {
         Assignment a = newAssignment();
 
-        assertThrows(IllegalStateException.class, () -> a.startTransport("h-apollo"));
+        assertThrows(IllegalStateException.class, () -> a.startTransport("h-apollo", Set.of()));
         assertEquals(AssignmentStatus.ASSIGNED, a.status());
         assertTrue(a.hospitalId().isEmpty());
     }
@@ -273,8 +306,8 @@ public class AssignmentTest {
     void aBlankHospitalIsRejected() {
         Assignment a = arrived(AssignmentRole.PRIMARY);
 
-        assertThrows(IllegalArgumentException.class, () -> a.startTransport(" "));
-        assertThrows(IllegalArgumentException.class, () -> a.startTransport(null));
+        assertThrows(IllegalArgumentException.class, () -> a.startTransport(" ", Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> a.startTransport(null, Set.of()));
         assertEquals(AssignmentStatus.ARRIVED, a.status());
     }
 
@@ -290,27 +323,34 @@ public class AssignmentTest {
     @Test
     void aTransportingTripCannotBeDemoted() {
         Assignment a = arrived(AssignmentRole.PRIMARY);
-        a.startTransport("h-apollo");
+        a.startTransport("h-apollo", Set.of());
 
         assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
         assertEquals(AssignmentRole.PRIMARY, a.role());
     }
 
     @Test
-    void restoreKeepsTheHospital() {
+    void restoreKeepsTheHospitalAndNeeds() {
         Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.TRANSPORTING,
-                ASSIGNED_AT, "h-apollo");
+                ASSIGNED_AT, "h-apollo", Set.of(Capability.STROKE));
 
         assertEquals(AssignmentStatus.TRANSPORTING, a.status());
         assertEquals("h-apollo", a.hospitalId().orElseThrow());
+        assertEquals(Set.of(Capability.STROKE), a.needs());
+    }
+
+    @Test
+    void restoreRejectsMissingNeeds() {
+        assertThrows(IllegalArgumentException.class, () -> Assignment.restore("t1", "c1", "u1",
+                AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT, null, null));
     }
 
     @Test
     void restoreRejectsATransportWithoutAHospitalOrABlankHospital() {
         assertThrows(IllegalArgumentException.class, () -> Assignment.restore("t1", "c1", "u1",
-                AssignmentRole.PRIMARY, AssignmentStatus.TRANSPORTING, ASSIGNED_AT, null));
+                AssignmentRole.PRIMARY, AssignmentStatus.TRANSPORTING, ASSIGNED_AT, null, Set.of()));
         assertThrows(IllegalArgumentException.class, () -> Assignment.restore("t1", "c1", "u1",
-                AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT, " "));
+                AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT, " ", Set.of()));
     }
 
     /** The public constructor is unchanged: a new random id each time, starting in ASSIGNED. */

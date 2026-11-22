@@ -576,7 +576,7 @@ public class AssignmentManagerTest {
     void startTransportSavesTheHospitalAnnouncesItAndKeepsTheUnitBusy() {
         Assignment a = arrivedOnScene("case-1", "r1");
 
-        Assignment moving = manager.startTransport(a.id(), "h-apollo");
+        Assignment moving = manager.startTransport(a.id(), "h-apollo", Set.of());
 
         assertEquals(AssignmentStatus.TRANSPORTING, moving.status());
         assertEquals(AssignmentStatus.TRANSPORTING, tripStatus(a));
@@ -590,7 +590,7 @@ public class AssignmentManagerTest {
     @Test
     void completingATransportFreesTheUnit() {
         Assignment a = arrivedOnScene("case-1", "r1");
-        manager.startTransport(a.id(), "h-apollo");
+        manager.startTransport(a.id(), "h-apollo", Set.of());
 
         manager.complete(a.id());
 
@@ -602,7 +602,7 @@ public class AssignmentManagerTest {
     @Test
     void aTransportCannotBeCancelledOrFailed() {
         Assignment a = arrivedOnScene("case-1", "r1");
-        manager.startTransport(a.id(), "h-apollo");
+        manager.startTransport(a.id(), "h-apollo", Set.of());
         events.clear();
 
         assertThrows(IllegalStateException.class, () -> manager.cancel(a.id()));
@@ -617,9 +617,9 @@ public class AssignmentManagerTest {
     void startTransportIsRefusedBeforeArrivalAndForUnknownTrips() {
         Assignment a = dispatched("case-1", "r1");
 
-        assertThrows(IllegalStateException.class, () -> manager.startTransport(a.id(), "h-apollo"));
-        assertThrows(IllegalStateException.class, () -> manager.startTransport("no-such-trip", "h-apollo"));
-        assertThrows(IllegalArgumentException.class, () -> manager.startTransport(" ", "h-apollo"));
+        assertThrows(IllegalStateException.class, () -> manager.startTransport(a.id(), "h-apollo", Set.of()));
+        assertThrows(IllegalStateException.class, () -> manager.startTransport("no-such-trip", "h-apollo", Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> manager.startTransport(" ", "h-apollo", Set.of()));
 
         assertEquals(AssignmentStatus.ASSIGNED, tripStatus(a));
         assertTrue(events.published().isEmpty());

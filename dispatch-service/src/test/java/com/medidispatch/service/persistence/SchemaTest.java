@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * needs Docker running), emptied before every test.
  *
  * <p>Error codes checked here are standard SQLStates: {@code 23505} = unique violation, {@code 23514} = check
- * violation.
+ * violation, {@code 23503} = foreign key violation.
  */
 class SchemaTest {
 
@@ -198,6 +198,74 @@ class SchemaTest {
         assertEquals(2000, metres, 50);
     }
 
+    // ---- V2: hospitals, bases, transport ----
+
+    /** The clinic rule, in the database too: no emergency department means no capabilities and never accepting. */
+    @Test
+    void aClinicThatAcceptsPatientsOrClaimsServicesIsRefused() throws SQLException {
+        facility("c-ok", "CLINIC", "{}", false);
+
+        SQLException accepting = assertThrows(SQLException.class, () -> facility("c-bad-1", "CLINIC", "{}", true));
+        SQLException stroke = assertThrows(SQLException.class, () -> facility("c-bad-2", "CLINIC", "{STROKE}", false));
+        assertEquals("23514", accepting.getSQLState());
+        assertEquals("23514", stroke.getSQLState());
+    }
+
+    @Test
+    void anUnknownCapabilityIsRefused() throws SQLException {
+        facility("h-ok", "HOSPITAL", "{STROKE,CARDIAC}", true);
+
+        SQLException refused = assertThrows(SQLException.class, () -> facility("h-bad", "HOSPITAL", "{DENTIST}", true));
+        assertEquals("23514", refused.getSQLState());
+    }
+
+    /** units.base_id is a foreign key: a unit can only belong to a facility that exists. */
+    @Test
+    void aUnitsBaseMustExist() throws SQLException {
+        facility("h-base", "HOSPITAL", "{}", true);
+        unit("u-based", DELHI_LAT, DELHI_LON);
+
+        assertEquals(1, update(conn, "UPDATE units SET base_id = ? WHERE id = ?", "h-base", "u-based"));
+        SQLException refused = assertThrows(SQLException.class,
+                () -> update(conn, "UPDATE units SET base_id = ? WHERE id = ?", "h-nowhere", "u-based"));
+        assertEquals("23503", refused.getSQLState());
+    }
+
+    /** The same rule as Assignment: a transport always knows its hospital. Cases accept TRANSPORTING too. */
+    @Test
+    void aTransportNeedsAHospital() throws SQLException {
+        patient("p-move");
+        openCase("c-move", "p-move");
+        unit("u-move", DELHI_LAT, DELHI_LON);
+        facility("h-move", "HOSPITAL", "{}", true);
+        trip("t-move", "c-move", "u-move", "ARRIVED");
+
+        SQLException refused = assertThrows(SQLException.class,
+                () -> update(conn, "UPDATE assignments SET status = 'TRANSPORTING' WHERE id = ?", "t-move"));
+        assertEquals("23514", refused.getSQLState());
+
+        assertEquals(1, update(conn, "UPDATE assignments SET status = 'TRANSPORTING', hospital_id = ?, "
+                + "needs = '{STROKE}' WHERE id = ?", "h-move", "t-move"));
+        assertEquals(1, update(conn, "UPDATE cases SET status = 'TRANSPORTING' WHERE id = ?", "c-move"));
+    }
+
+    /** The rebuilt partial index: an ambulance carrying a patient is on a trip, so it cannot get a second one. */
+    @Test
+    void aUnitCarryingAPatientCannotGetASecondTrip() throws SQLException {
+        patient("p-carry-1");
+        patient("p-carry-2");
+        openCase("c-carry-1", "p-carry-1");
+        openCase("c-carry-2", "p-carry-2");
+        unit("u-carry", DELHI_LAT, DELHI_LON);
+        facility("h-carry", "HOSPITAL", "{}", true);
+        update(conn, "INSERT INTO assignments (id, case_id, unit_id, role, status, assigned_at, hospital_id) "
+                + "VALUES ('t-carry-1', 'c-carry-1', 'u-carry', 'PRIMARY', 'TRANSPORTING', now(), 'h-carry')");
+
+        SQLException refused = assertThrows(SQLException.class,
+                () -> trip("t-carry-2", "c-carry-2", "u-carry", "ASSIGNED"));
+        assertEquals("23505", refused.getSQLState());
+    }
+
     // ---- helpers ----
 
     /** @return a new connection to the test database */
@@ -265,6 +333,13 @@ class SchemaTest {
         update(conn, "INSERT INTO units (id, type, status, position, moved_from) "
                         + "VALUES (?, 'AMBULANCE_ALS', 'AVAILABLE', ST_Point(?, ?, 4326)::geography, ST_Point(?, ?, 4326)::geography)",
                 id, lon, lat, lon, lat);
+    }
+
+    /** A facility in central Delhi; {@code capabilities} is a Postgres array literal such as {@code "{STROKE}"}. */
+    private static void facility(String id, String kind, String capabilities, boolean accepting) throws SQLException {
+        update(conn, "INSERT INTO facilities (id, name, kind, location, capabilities, accepting) "
+                        + "VALUES (?, ?, ?, ST_Point(?, ?, 4326)::geography, ?::text[], ?)",
+                id, "Facility " + id, kind, DELHI_LON, DELHI_LAT, capabilities, accepting);
     }
 
     /** A PRIMARY trip in the given status. */

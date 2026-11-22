@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -199,7 +200,7 @@ public class PreemptorTest {
         assignmentManager.onEnRoute(tripOf(a.id()));
         assignmentManager.onArrived(tripOf(a.id()));
         caseManager.onTransporting(a.id());
-        assignmentManager.startTransport(tripOf(a.id()), "h-apollo");
+        assignmentManager.startTransport(tripOf(a.id()), "h-apollo", Set.of());
         Case b = openCase("pb", RiskBand.CRITICAL);
 
         assertFalse(preemptor.makeRoomFor(b));

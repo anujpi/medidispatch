@@ -1,5 +1,6 @@
 package com.medidispatch.service.persistence;
 
+import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
@@ -52,6 +53,18 @@ class JdbcResourceRepositoryTest {
         assertEquals(DELHI, found.movedFrom());
         assertEquals(Optional.of(T0), found.lastSeenAt());
         assertEquals(Optional.of(T0.minusSeconds(60)), found.lastMovedAt());
+    }
+
+    /** The base (V2: units.base_id) survives the round trip; no base comes back as empty. */
+    @Test
+    void theBaseComesBack() {
+        new JdbcFacilityRepository(TestDatabase.jdbc()).save(Facility.clinic("c-lane", "Lane Clinic", DELHI));
+
+        repo.save(new Resource("u-based", ResourceType.NURSE, DELHI, "c-lane"));
+        repo.save(new Resource("u-free", ResourceType.NURSE, DELHI));
+
+        assertEquals(Optional.of("c-lane"), repo.findById("u-based").orElseThrow().baseId());
+        assertEquals(Optional.empty(), repo.findById("u-free").orElseThrow().baseId());
     }
 
     /** NULL in the table is "never" in the domain. */

@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (801 tests: 591 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
+## Built so far (822 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 142 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
 Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
@@ -356,6 +356,7 @@ everyone's update.
   TimescaleDB), db/user/password all `medidispatch` (ponytail: plain-text dev password), laptop port 5433 (a Windows Postgres service owns 5432 here; container port 5432), named volume
   dbdata mounted at /home/postgres/pgdata/data (this image's data dir, NOT /var/lib/postgresql/data).
 - dispatch-service/src/main/resources/db/migration/V1__init.sql (Flyway; never edit after it has run, add V2...).
+  V2__hospitals.sql: see "Hospitals" below.
   Conventions: text ids; enums as text + CHECK; geography(Point, 4326), LONGITUDE FIRST (ST_Point(lon, lat, 4326)),
   metres; timestamptz everywhere (driver maps it to OffsetDateTime: instant.atOffset(ZoneOffset.UTC)).
   Tables: patients(id, home); cases(id, patient_id, status, band, opened_at, queued) with partial unique index
@@ -498,7 +499,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
   same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
-## Hospitals (H1, H1b, H2 written, core only; H3 to do)
+## Hospitals (H1, H1b, H2, H3a written; H3b, H3c to do)
 - Capability enum: CARDIAC, STROKE, TRAUMA, PAEDIATRIC. FacilityKind: HOSPITAL, CLINIC.
 - Facility record (id, name, location, kind, capabilities, accepting) replaced H1's Hospital: one record with a kind,
   because hospitals and clinics differ only in canTreat. Compact constructor: blank id/name, null location/kind/
@@ -513,18 +514,20 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   empty only if no hospital. Straight-line km (ponytail: routing later; reads all facilities).
 - Resource.baseId: Optional<String>; 3-arg constructor = no base (delegates to the 4-arg one); blank -> IAE;
   restore(id, type, baseId, status, ...) (baseId is the 3rd parameter). Refer by id like trips do; existence is
-  checked at registration (H3) and by a foreign key. JdbcResourceRepository passes null until V2 adds units.base_id.
+  checked at registration (H3b) and by the units.base_id foreign key. JdbcResourceRepository reads/writes base_id.
 - H2, the transport leg (one trip, second leg): trip ARRIVED -> TRANSPORTING -> DONE only (or ARRIVED -> DONE on
   scene); case RESPONDING -> TRANSPORTING -> STABILISED only, then CLOSED. TRANSPORTING is active (not terminal).
   Upgrader (RESPONDING only), Preemptor (ASSIGNED/EN_ROUTE only), TripMonitor (EN_ROUTE only) and TimeoutMonitor
   (ASSIGNED only) skip it with no code change; CaseManager.handle only updates the band (default branch). Cancel and
   fail on a TRANSPORTING trip are refused (breakdown during transport: BACKLOG).
-- Assignment.hospitalId (Optional getter). startTransport(hospitalId) is the ONLY way into TRANSPORTING: blank -> IAE;
-  not PRIMARY or not ARRIVED -> ISE; transitionTo(TRANSPORTING) -> ISE "use startTransport". demoteToSupport refuses
-  a TRANSPORTING trip. restore(id, caseId, resourceId, role, status, assignedAt, hospitalId): blank hospital -> IAE,
-  TRANSPORTING without one -> IAE. The hospital stays after DONE (history). TripEntity passes null until V2.
+- Assignment.hospitalId (Optional getter) and needs() (unmodifiable Set<Capability>, empty until transport; added
+  in H3a so the hospital pre-alert can say "stroke"). startTransport(hospitalId, needs) is the ONLY way into
+  TRANSPORTING: blank hospital or missing/null-containing needs -> IAE; not PRIMARY or not ARRIVED -> ISE;
+  transitionTo(TRANSPORTING) -> ISE "use startTransport". demoteToSupport refuses a TRANSPORTING trip.
+  restore(id, caseId, resourceId, role, status, assignedAt, hospitalId, needs): blank hospital -> IAE, TRANSPORTING
+  without one -> IAE, needs as above. Hospital and needs stay after DONE (history).
 - ResourceType.canCarryPatient(): AMBULANCE_ALS/BLS only (a nurse asking for an ambulance: BACKLOG).
-- AssignmentManager.startTransport(tripId, hospitalId): save + AssignmentStatusChanged(ARRIVED -> TRANSPORTING);
+- AssignmentManager.startTransport(tripId, hospitalId, needs): save + AssignmentStatusChanged(ARRIVED -> TRANSPORTING);
   unit stays ASSIGNED and claimed; complete() from TRANSPORTING frees it as usual. Private find() helper shared by
   move/demoteToSupport/startTransport. CaseManager.onTransporting(caseId).
 - engine/TransportCoordinator(assignments, resources, chooser, assignmentManager, caseManager).start(tripId, needed):
@@ -532,11 +535,27 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   hospital is registered"), then moves the CASE FIRST (the only step that can still fail) and then the trip, so any
   refusal changes nothing. No new event (decided): listeners read the hospital from the trip. Finishing = the usual
   complete -> onStabilised -> close (service completeTrip, LiveEngine, Simulation all work unchanged).
-- H3 = V2 migration (facilities table; assignments.hospital_id; units.base_id; CHECKs on cases.status and
-  assignments.status gain TRANSPORTING; one_active_trip_per_unit must include TRANSPORTING), JdbcFacilityRepository,
-  TripEntity hospital column, DispatchService methods (startTransport repeat-safe: already TRANSPORTING -> return
-  as is), REST, pre-alert read model (ETA = straight line at 40 km/h from the unit's live position, ponytail).
-  Mostly F. Until V2, a TRANSPORTING row cannot be stored, but nothing in the service calls start() yet.
+- H3a (database), V2__hospitals.sql: facilities(id, name, kind CHECK, location geography, capabilities text[] NOT
+  NULL DEFAULT '{}' CHECK (capabilities <@ ARRAY[the 4 names]), accepting; table CHECK kind = 'HOSPITAL' OR (no
+  capabilities AND NOT accepting)). Array, not a join table (decided: read whole, the chooser filters in Java).
+  units.base_id REFERENCES facilities. assignments.hospital_id REFERENCES facilities; assignments.needs text[] NOT
+  NULL DEFAULT '{}' (same <@ CHECK); CONSTRAINT transport_has_hospital CHECK (status <> 'TRANSPORTING' OR
+  hospital_id IS NOT NULL). cases_status_check and assignments_status_check (Postgres's automatic names for V1's
+  column CHECKs, <table>_<column>_check) dropped and re-added with TRANSPORTING in ONE ALTER TABLE each;
+  one_active_trip_per_unit dropped and recreated with TRANSPORTING. Nullable/constant-default ADD COLUMN = metadata
+  only, no row rewrite. No inbound index (ponytail, tens of active trips). No facility delete (FKs keep history).
+- JdbcFacilityRepository: upsert, findById, findAll ORDER BY id; capabilities as String[] param (driver -> text[]),
+  read with rs.getArray(...).getArray(). Package-private static toNames(Set<Capability>) (EnumSet order, so stored
+  arrays are stable) / fromNames(rs, column), also used by TripEntity. TripEntity: hospitalId, String[] needs
+  (Hibernate maps Java arrays to Postgres arrays itself; ddl-auto=validate accepts text[]).
+  TestDatabase TRUNCATE includes facilities. Tests: SchemaTest +5 (clinic rule, unknown capability, base FK = SQLState
+  23503, transport needs hospital, a transporting unit cannot get a second trip), JdbcFacilityRepositoryTest (8),
+  JpaAssignmentRepositoryTest +3 (hospital + needs round trip, empty needs, TRANSPORTING still active),
+  JdbcResourceRepositoryTest +1 (base round trip).
+- H3b next (F): EngineConfig beans (FacilityRepository, DestinationChooser, TransportCoordinator); DispatchService
+  methods (registerFacility, setAccepting, units with a base that must exist, startTransport repeat-safe: already
+  TRANSPORTING -> return as is); FacilityController; POST /trips/{id}/transport. H3c: GET /facilities/{id}/units and
+  /inbound (pre-alert: ETA = straight line at 40 km/h from the unit's live position, ponytail; latest vitals; needs).
 - Registration (decided Nov 22): the OPERATOR adds facilities (POST /facilities; the simulator plays the operator);
   self sign-up is skipped (trust: a fake hospital must never get patients). Each hospital manages its own:
   PUT /facilities/{id}/accepting, POST /units with baseId (base must exist), GET /facilities/{id}/units (its fleet),
@@ -545,6 +564,6 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
 
 ## Next steps
 Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-hospitals H3 (V2 migration, adapters, endpoints, pre-alert; F). Then the
+hospitals H3b (service + REST; F), then H3c (hospital views, pre-alert; F). Then the
 simulator drives the service over HTTP and registers hospitals and clinics; units start at and return to their base (F).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
