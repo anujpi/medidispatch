@@ -42,10 +42,11 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (839 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 159 in dispatch-service)
+## Built so far (865 tests: 610 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 170 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
-(AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
-Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
+(AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
+driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
+Patient (optional PersonDetails and emergency Contact, see "People" below), Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, TRANSPORTING, DONE, CANCELLED,
 TIMED_OUT, FAILED). CaseStatus has TRANSPORTING too (see "Hospitals").
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
@@ -309,9 +310,10 @@ written out (plugins are not managed by the BOM) and the repackage goal.
 ## dispatch-service REST API (DONE, tested), package com.medidispatch.service.api
 Controllers only translate HTTP <-> DispatchService calls; no logic. Decisions taken: repeated steps -> 200; readings
 always 200 with the outcome (DUPLICATE, TOO_OLD... are not errors, so devices don't retry); unit without a trip -> 204.
-- PatientController (/api): POST /patients (201; body PatientRequest), GET /patients/{id}/case, POST /readings (body is
+- PatientController (/api): POST /patients (201; body PatientRequest), GET /patients/{id} (PatientInfo, with the
+  emergency contact; ponytail: personal data with no login yet), GET /patients/{id}/case, POST /readings (body is
   the domain VitalsReading record itself; 200 + ReadingResult), GET /cases/{id}.
-- UnitController (/api/units): POST (201 + UnitInfo; body UnitRequest, optional baseId: unknown base -> 400), GET /{id}, GET /{id}/trip (200 or 204; 404 for
+- UnitController (/api/units): POST (201 + UnitInfo; body UnitRequest; baseId and driver required, unknown base -> 400), GET /{id}, GET /{id}/trip (200 or 204; 404 for
   an unknown unit), PUT /{id}/position (204; body Coordinates; PUT = idempotent by design), POST /{id}/back-in-service.
 - TripController (/api/trips): GET /{id}, POST /{id}/accept, /arrive, /transport, /complete (action URLs, not "set
   the status"). /transport body TransportRequest {"needs": [...]}, @RequestBody(required = false): no body or null
@@ -321,10 +323,12 @@ always 200 with the outcome (DUPLICATE, TOO_OLD... are not errors, so devices do
   AcceptingRequest {"accepting": false}; PUT = sets a value, repeat-safe; clinic -> true is 400). ponytail: no login,
   any caller acts for any hospital (BACKLOG).
 - Request records: Coordinates(Double latitude, Double longitude) + toLocation() (NOT Location as a body: missing
-  double fields silently become 0.0; boxed Double + null check refuses them), PatientRequest(id, Coordinates home),
-  UnitRequest(id, ResourceType type, Coordinates position, String baseId). Compact constructors refuse a missing
-  position; blank ids and missing types are refused by the engine's own constructors. FacilityRequest(id, name, kind,
-  position, capabilities, Boolean accepting): kind and position required, missing capabilities = none, missing
+  double fields silently become 0.0; boxed Double + null check refuses them), PatientRequest(id, Coordinates home,
+  name, Integer age, sex, Contact emergencyContact): name/age/sex required (checked with new PersonDetails(...) in
+  the compact constructor), contact optional; toPatient(). UnitRequest(id, ResourceType type, Coordinates position,
+  String baseId, Contact driver): baseId and driver REQUIRED (every unit has an owner). Compact constructors refuse
+  a missing position; blank ids and missing types are refused by the engine's own constructors. FacilityRequest(id,
+  name, kind, position, capabilities, Boolean accepting, String phone): kind, position and phone required, missing capabilities = none, missing
   accepting = (kind == HOSPITAL); toFacility() lets the Facility record check the rest. AcceptingRequest(Boolean):
   required (guessing could misdirect ambulances). TransportRequest(Set<Capability> needs): null -> Set.of().
 - ApiErrors (@RestControllerAdvice, returns Spring's ProblemDetail, RFC 9457): NotFoundException 404,
@@ -593,9 +597,44 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   GET /facilities/{id}/inbound (pre-alert: ETA, latest vitals, needs). No auth yet (BACKLOG). Dispatch still sends
   the nearest free unit whatever its base; the base is where a unit waits and returns to.
 
+## People (B1, written)
+Decided Nov 22: the core objects carry who people are, as OPTIONAL fields (the in-memory simulator stays
+anonymous); the API's request records make them REQUIRED (every client goes through the API). DispatchService is
+permissive like the core. Dispatch never uses any of it.
+- domain/Contact(name, phone): blank name -> IAE; static checkPhone(phone): optional leading +, then 7 to 15
+  digits, spaces and dashes allowed ("+91 98450 12345" passes). Used for drivers, emergency contacts, facility phones.
+- domain/PersonDetails(name, age 0..MAX_AGE=120, Sex sex); domain/Sex {FEMALE, MALE, OTHER}.
+- Patient: new 4-arg constructor (id, location, PersonDetails details, Contact emergencyContact), the old 2-arg one
+  delegates with nulls; details() and emergencyContact() are Optionals.
+- Resource: 5-arg constructor (..., baseId, Contact driver), 3/4-arg delegate; restore(id, type, baseId, driver,
+  status, location, movedFrom, lastSeenAt, lastMovedAt); driver() Optional.
+- Facility record: 7th component String phone (null = none, else checkPhone); a 6-arg constructor without phone
+  keeps old calls working; withPhone(phone); withAccepting keeps the phone.
+- V3__people.sql: units.driver_name/driver_phone (CONSTRAINT driver_complete: both or neither); patients.name,
+  age (CHECK 0..120), sex (CHECK), emergency_name/emergency_phone (details_complete, emergency_contact_complete);
+  facilities.phone. All NULLable: pre-V3 rows exist (ponytail: NOT NULL in a later migration once cleaned). The
+  three Jdbc repositories read/write them (nullable params typed with Types.VARCHAR/INTEGER).
+- DispatchService.registerPatient(Patient) (was (id, home)); registerUnit(id, type, where, baseId, Contact driver);
+  findPatient(id) -> Optional<PatientInfo>. DTOs: UnitInfo + driver, FacilityInfo + phone, CaseInfo + patientName,
+  age, sex, InboundPatient + patientName, age, sex (from(trip, case, patient, unit, ...)), PatientInfo (new: id,
+  lat, lon, name, age, sex, emergencyContact; never in the live feed).
+- Tests: ContactTest, PersonDetailsTest, PatientTest +3, ResourceTest +2, FacilityTest +3; SchemaTest +2 (age 150,
+  sex ROBOT, name without age/sex, driver without phone); repository round trips; DispatchServiceTest +2 (full
+  record lookup; case, pre-alert and unit show the people); ApiTest +3 (record over HTTP, missing data 400s, unit
+  shows its driver). ApiTest units belong to a shared clinic "api-base" at (0, 0), created in @BeforeEach if absent.
+- Security finding (automated review, Nov 22): GET /api/patients/{id} exposes personal data with no login; known
+  and deferred to the security piece (BACKLOG access control). Also for that piece: caller-chosen guessable patient
+  ids (p1) -> consider server-generated UUIDs; emergency contact only for roles that need it.
+
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-the simulator drives the service over HTTP (F): it registers hospitals and clinics, units start at their base,
-crews transport patients and units return to their base (the "return to base" leg does not exist yet: decide in
-that piece). Hospitals are done.
+Order agreed Nov 22 (the user does not want pacing by PLAN's week dates): B1 people (done) -> S1/S2 the simulator
+over HTTP, building a BANGALORE city (real coordinates, made-up hospital names at neighbourhoods, units owned by
+hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
+driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
+SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
+S1 plan (approved directions): a CityLink interface between agents and the engine (LiveEngine in memory, HttpLink
+over HTTP); keep ScaledClock for the world's pace but send REAL timestamps; one sender thread (order matters);
+positions coalesced to at most one per unit per second; crews learn trips from the /api/live SSE feed; refuse to
+start on a non-empty database; Jackson 3.1.5 in dispatch-sim; package com.medidispatch.sim.http; default HTTP
+speed 10.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

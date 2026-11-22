@@ -5,6 +5,7 @@ import com.medidispatch.core.domain.AssignmentRole;
 import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.Case;
+import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
@@ -131,21 +132,31 @@ public class DispatchService {
     }
 
     /**
-     * Adds a new patient at a home location.
+     * Adds a new patient. Whether their details are required is the API's rule (the request records), so the
+     * service itself also accepts an anonymous patient.
      *
-     * @param id   the patient id, unique
-     * @param home where the patient is
+     * @param patient the new patient, with their details and emergency contact if known
      * @throws IllegalStateException if a patient with this id already exists
      */
-    public synchronized void registerPatient(String id, Location home) {
+    public synchronized void registerPatient(Patient patient) {
         // executeWithoutResult: a transaction for work that returns nothing.
         tx.executeWithoutResult(status -> {
             // Without this check, save() would silently replace the existing patient.
-            if (patients.findById(id).isPresent()) {
-                throw new IllegalStateException("Patient " + id + " already exists");
+            if (patients.findById(patient.id()).isPresent()) {
+                throw new IllegalStateException("Patient " + patient.id() + " already exists");
             }
-            patients.save(new Patient(id, home));
+            patients.save(patient);
         });
+    }
+
+    /**
+     * Looks up a patient's full record, including the emergency contact (which the live feed never carries).
+     *
+     * @param patientId the patient
+     * @return the patient, or empty if there is none with that id
+     */
+    public synchronized Optional<PatientInfo> findPatient(String patientId) {
+        return tx.execute(status -> patients.findById(patientId).map(p -> PatientInfo.from(p)));
     }
 
     /**
@@ -155,11 +166,13 @@ public class DispatchService {
      * @param type  what kind of unit it is
      * @param where  where the unit is now
      * @param baseId the hospital or clinic the unit belongs to; {@code null} for none
+     * @param driver who drives the unit and how to reach them; {@code null} if not on file
      * @return the new unit
      * @throws IllegalStateException    if a unit with this id already exists
      * @throws IllegalArgumentException if the base does not exist (a wrong value in the request, so 400, not 404)
      */
-    public synchronized UnitInfo registerUnit(String id, ResourceType type, Location where, String baseId) {
+    public synchronized UnitInfo registerUnit(String id, ResourceType type, Location where, String baseId,
+                                              Contact driver) {
         // execute: a transaction whose result (the lambda's return value) is handed back after the commit.
         return tx.execute(status -> {
             if (resources.findById(id).isPresent()) {
@@ -169,7 +182,7 @@ public class DispatchService {
             if (baseId != null && facilities.findById(baseId).isEmpty()) {
                 throw new IllegalArgumentException("Base " + baseId + " does not exist");
             }
-            Resource unit = new Resource(id, type, where, baseId);
+            Resource unit = new Resource(id, type, where, baseId, driver);
             resources.save(unit);
             return UnitInfo.from(unit);
         });
@@ -473,11 +486,12 @@ public class DispatchService {
                 }
                 // Safe: a trip always has its case and unit (foreign keys).
                 Case c = cases.findById(trip.caseId()).orElseThrow();
+                Patient patient = patients.findById(c.patientId()).orElseThrow();
                 Resource unit = resources.findById(trip.resourceId()).orElseThrow();
                 double km = unit.location().distanceKmTo(hospital.location());
                 long etaMinutes = (long) Math.ceil(km / TRANSPORT_SPEED_KMH * 60);
                 VitalsReading latest = vitals.latestFor(c.patientId()).orElse(null);
-                inbound.add(InboundPatient.from(trip, c, unit, km, etaMinutes, latest));
+                inbound.add(InboundPatient.from(trip, c, patient, unit, km, etaMinutes, latest));
             }
             inbound.sort((a, b) -> {
                 int byEta = Long.compare(a.etaMinutes(), b.etaMinutes());

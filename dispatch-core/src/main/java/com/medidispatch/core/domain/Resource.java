@@ -21,6 +21,7 @@ public class Resource {
     private Instant lastSeenAt;
     private Instant lastMovedAt;
     private final String baseId;
+    private final Contact driver;
 
     /**
      * Creates a unit with no base that is {@link ResourceStatus#AVAILABLE} and has not reported yet.
@@ -45,6 +46,21 @@ public class Resource {
      * @throws IllegalArgumentException if the id or baseId is blank or a required argument is missing
      */
     public Resource(String id, ResourceType type, Location location, String baseId) {
+        this(id, type, location, baseId, null);
+    }
+
+    /**
+     * Creates a unit that is {@link ResourceStatus#AVAILABLE} and has not reported yet, with its driver.
+     *
+     * @param id       unique unit id; never blank
+     * @param type     what kind of unit it is
+     * @param location where the unit is now
+     * @param baseId   the id of the hospital or clinic the unit belongs to; {@code null} for none, never blank
+     * @param driver   who drives it and how to reach them; {@code null} if not on file. The engine never uses it:
+     *                 it is for the control room and the hospital
+     * @throws IllegalArgumentException if the id or baseId is blank or a required argument is missing
+     */
+    public Resource(String id, ResourceType type, Location location, String baseId, Contact driver) {
         if(id == null || id.isBlank()) throw new IllegalArgumentException("Id must be provided");
         if(type == null) throw new IllegalArgumentException("Type must be provided");
         if(location == null) throw new IllegalArgumentException("Location must be provided");
@@ -54,6 +70,7 @@ public class Resource {
         this.location = location;
         this.movedFrom= location;
         this.baseId = baseId;
+        this.driver = driver;
     }
 
     /**
@@ -66,6 +83,7 @@ public class Resource {
      * @param id          unique unit id; never blank
      * @param type        what kind of unit it is
      * @param baseId      the facility it belongs to; {@code null} for none
+     * @param driver      its driver; {@code null} if not on file
      * @param status      its saved status
      * @param location    where it is
      * @param movedFrom   the last position that counted as movement ({@link #reportLocation})
@@ -74,11 +92,12 @@ public class Resource {
      * @return the rebuilt unit
      * @throws IllegalArgumentException if the id is blank or a required argument is missing
      */
-    public static Resource restore(String id, ResourceType type, String baseId, ResourceStatus status,
-                                   Location location, Location movedFrom, Instant lastSeenAt, Instant lastMovedAt) {
+    public static Resource restore(String id, ResourceType type, String baseId, Contact driver,
+                                   ResourceStatus status, Location location, Location movedFrom, Instant lastSeenAt,
+                                   Instant lastMovedAt) {
         if (status == null) throw new IllegalArgumentException("Status must be provided");
         if (movedFrom == null) throw new IllegalArgumentException("movedFrom must be provided");
-        Resource r = new Resource(id, type, location, baseId);
+        Resource r = new Resource(id, type, location, baseId, driver);
         r.status = status;
         r.movedFrom = movedFrom;
         r.lastSeenAt = lastSeenAt;
@@ -167,4 +186,7 @@ public class Resource {
 
     /** The id of the hospital or clinic the unit belongs to; empty if it has no base. */
     public Optional<String> baseId() { return Optional.ofNullable(baseId); }
+
+    /** Who drives the unit and how to reach them; empty if not on file. */
+    public Optional<Contact> driver() { return Optional.ofNullable(driver); }
 }

@@ -1,5 +1,6 @@
 package com.medidispatch.service.persistence;
 
+import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
@@ -42,7 +43,7 @@ class JdbcResourceRepositoryTest {
     /** Every field survives the round trip: status, both positions (not swapped), both times. */
     @Test
     void savedUnitComesBackWithEveryField() {
-        repo.save(Resource.restore("u1", ResourceType.DOCTOR, null, ResourceStatus.ASSIGNED, kmNorth(1), DELHI,
+        repo.save(Resource.restore("u1", ResourceType.DOCTOR, null, null, ResourceStatus.ASSIGNED, kmNorth(1), DELHI,
                 T0, T0.minusSeconds(60)));
 
         Resource found = repo.findById("u1").orElseThrow();
@@ -65,6 +66,18 @@ class JdbcResourceRepositoryTest {
 
         assertEquals(Optional.of("c-lane"), repo.findById("u-based").orElseThrow().baseId());
         assertEquals(Optional.empty(), repo.findById("u-free").orElseThrow().baseId());
+    }
+
+    /** The driver (V3) survives the round trip; no driver comes back as empty. */
+    @Test
+    void theDriverComesBack() {
+        Contact ravi = new Contact("Ravi Kumar", "+91 98450 12345");
+
+        repo.save(new Resource("u-driven", ResourceType.AMBULANCE_ALS, DELHI, null, ravi));
+        repo.save(new Resource("u-nobody", ResourceType.AMBULANCE_ALS, DELHI));
+
+        assertEquals(Optional.of(ravi), repo.findById("u-driven").orElseThrow().driver());
+        assertEquals(Optional.empty(), repo.findById("u-nobody").orElseThrow().driver());
     }
 
     /** NULL in the table is "never" in the domain. */
@@ -235,7 +248,7 @@ class JdbcResourceRepositoryTest {
 
     /** A unit at {@code where} in the given status, never seen. */
     private static Resource withStatus(String id, ResourceType type, ResourceStatus status, Location where) {
-        return Resource.restore(id, type, null, status, where, where, null, null);
+        return Resource.restore(id, type, null, null, status, where, where, null, null);
     }
 
     private static List<String> ids(List<Resource> units) {

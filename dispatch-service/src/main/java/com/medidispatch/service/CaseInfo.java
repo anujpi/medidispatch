@@ -3,7 +3,9 @@ package com.medidispatch.service;
 import com.medidispatch.core.domain.Case;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Patient;
+import com.medidispatch.core.domain.PersonDetails;
 import com.medidispatch.core.domain.RiskBand;
+import com.medidispatch.core.domain.Sex;
 
 import java.time.Instant;
 
@@ -17,9 +19,12 @@ import java.time.Instant;
  * @param openedAt  when it was opened
  * @param latitude  where the patient is, so a map can draw the case
  * @param longitude where the patient is
+ * @param patientName the patient's name, or {@code null} for an anonymous patient
+ * @param age         the patient's age, or {@code null}
+ * @param sex         the patient's sex, or {@code null}
  */
 public record CaseInfo(String id, String patientId, CaseStatus status, RiskBand band, Instant openedAt,
-                       double latitude, double longitude) {
+                       double latitude, double longitude, String patientName, Integer age, Sex sex) {
 
     /**
      * Copies the fields out of a live engine case and its patient. Call it while holding the
@@ -30,7 +35,9 @@ public record CaseInfo(String id, String patientId, CaseStatus status, RiskBand 
      * @return the snapshot
      */
     static CaseInfo from(Case c, Patient patient) {
+        PersonDetails who = patient.details().orElse(null);
         return new CaseInfo(c.id(), c.patientId(), c.status(), c.band(), c.openedAt(),
-                patient.location().latitude(), patient.location().longitude());
+                patient.location().latitude(), patient.location().longitude(),
+                who == null ? null : who.name(), who == null ? null : who.age(), who == null ? null : who.sex());
     }
 }

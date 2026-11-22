@@ -1,6 +1,7 @@
 package com.medidispatch.service.live;
 
 import com.medidispatch.core.domain.Location;
+import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.service.DispatchService;
 import com.medidispatch.service.persistence.TestDatabaseConfig;
@@ -8,8 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -62,7 +63,7 @@ class LiveFeedTest {
             assertTrue(first.startsWith("data:"));
             assertFalse(first.contains("live-u1"));
 
-            service.registerUnit("live-u1", ResourceType.NURSE, new Location(28.62, 77.21), null);
+            service.registerUnit("live-u1", ResourceType.NURSE, new Location(28.62, 77.21), null, null);
 
             // Skip lines until a message mentions the new unit; it comes with the next broadcast.
             String line = stream.readLine();

@@ -1,7 +1,10 @@
 package com.medidispatch.service.persistence;
 
+import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
+import com.medidispatch.core.domain.PersonDetails;
+import com.medidispatch.core.domain.Sex;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -63,5 +66,29 @@ class JdbcPatientRepositoryTest {
     void nullArgumentsAreRejected() {
         assertThrows(IllegalArgumentException.class, () -> repo.save(null));
         assertThrows(IllegalArgumentException.class, () -> repo.findById(null));
+    }
+
+    // ---- V3: who the patient is ----
+
+    @Test
+    void detailsAndEmergencyContactComeBack() {
+        PersonDetails asha = new PersonDetails("Asha Rao", 68, Sex.FEMALE);
+        Contact son = new Contact("Vikram Rao", "+91 98450 12345");
+
+        repo.save(new Patient("p1", DELHI, asha, son));
+
+        Patient found = repo.findById("p1").orElseThrow();
+        assertEquals(asha, found.details().orElseThrow());
+        assertEquals(son, found.emergencyContact().orElseThrow());
+    }
+
+    /** An anonymous patient (no details, no contact) is stored with NULLs and comes back anonymous. */
+    @Test
+    void anAnonymousPatientComesBackAnonymous() {
+        repo.save(new Patient("p1", DELHI));
+
+        Patient found = repo.findById("p1").orElseThrow();
+        assertTrue(found.details().isEmpty());
+        assertTrue(found.emergencyContact().isEmpty());
     }
 }

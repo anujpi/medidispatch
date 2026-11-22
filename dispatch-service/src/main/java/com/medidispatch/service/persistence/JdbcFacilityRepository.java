@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
@@ -21,7 +22,7 @@ import java.util.Set;
 public class JdbcFacilityRepository implements FacilityRepository {
 
     private static final String COLUMNS = """
-            id, name, kind, capabilities, accepting,
+            id, name, kind, capabilities, accepting, phone,
             ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
             """;
 
@@ -47,11 +48,11 @@ public class JdbcFacilityRepository implements FacilityRepository {
             throw new IllegalArgumentException("facility is required");
         }
         jdbc.sql("""
-                INSERT INTO facilities (id, name, kind, location, capabilities, accepting)
-                VALUES (:id, :name, :kind, ST_Point(:lon, :lat, 4326)::geography, :capabilities, :accepting)
+                INSERT INTO facilities (id, name, kind, location, capabilities, accepting, phone)
+                VALUES (:id, :name, :kind, ST_Point(:lon, :lat, 4326)::geography, :capabilities, :accepting, :phone)
                 ON CONFLICT (id) DO UPDATE SET
                     name = excluded.name, kind = excluded.kind, location = excluded.location,
-                    capabilities = excluded.capabilities, accepting = excluded.accepting
+                    capabilities = excluded.capabilities, accepting = excluded.accepting, phone = excluded.phone
                 """)
                 .param("id", facility.id())
                 .param("name", facility.name())
@@ -60,6 +61,7 @@ public class JdbcFacilityRepository implements FacilityRepository {
                 .param("lat", facility.location().latitude())
                 .param("capabilities", toNames(facility.capabilities()))
                 .param("accepting", facility.accepting())
+                .param("phone", facility.phone(), Types.VARCHAR)
                 .update();
     }
 
@@ -127,6 +129,7 @@ public class JdbcFacilityRepository implements FacilityRepository {
                 new Location(rs.getDouble("lat"), rs.getDouble("lon")),
                 FacilityKind.valueOf(rs.getString("kind")),
                 fromNames(rs, "capabilities"),
-                rs.getBoolean("accepting"));
+                rs.getBoolean("accepting"),
+                rs.getString("phone"));
     }
 }

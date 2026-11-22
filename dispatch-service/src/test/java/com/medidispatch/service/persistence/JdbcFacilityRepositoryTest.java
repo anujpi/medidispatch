@@ -61,6 +61,16 @@ class JdbcFacilityRepositoryTest {
         assertEquals(FacilityKind.CLINIC, found.kind());
     }
 
+    /** The phone (V3) comes back; a facility saved without one has none. */
+    @Test
+    void thePhoneComesBack() {
+        repo.save(Facility.clinic("c-lane", "Lane Clinic", NOIDA).withPhone("+91 80 2345 6789"));
+        repo.save(Facility.clinic("c-quiet", "Quiet Clinic", NOIDA));
+
+        assertEquals("+91 80 2345 6789", repo.findById("c-lane").orElseThrow().phone());
+        assertNull(repo.findById("c-quiet").orElseThrow().phone());
+    }
+
     @Test
     void unknownIdIsEmpty() {
         assertEquals(Optional.empty(), repo.findById("nowhere"));

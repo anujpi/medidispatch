@@ -4,6 +4,7 @@ import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.service.CaseInfo;
 import com.medidispatch.service.DispatchService;
 import com.medidispatch.service.NotFoundException;
+import com.medidispatch.service.PatientInfo;
 import com.medidispatch.service.ReadingResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,7 +43,7 @@ public class PatientController {
     @PostMapping("/patients")
     @ResponseStatus(HttpStatus.CREATED)
     public void register(@RequestBody PatientRequest request) {
-        service.registerPatient(request.id(), request.home().toLocation());
+        service.registerPatient(request.toPatient());
     }
 
     /**
@@ -51,6 +52,18 @@ public class PatientController {
      * @param id the patient
      * @return the open case
      */
+    /**
+     * {@code GET /api/patients/{id}}: the patient's full record, including the emergency contact. 200 or 404.
+     *
+     * @param id the patient
+     * @return the patient
+     */
+    // ponytail: personal data with no login in front of it yet (BACKLOG: access control, the security piece).
+    @GetMapping("/patients/{id}")
+    public PatientInfo find(@PathVariable String id) {
+        return service.findPatient(id).orElseThrow(() -> new NotFoundException("Patient " + id + " not found"));
+    }
+
     @GetMapping("/patients/{id}/case")
     public CaseInfo openCase(@PathVariable String id) {
         return service.openCaseOf(id).orElseThrow(() -> new NotFoundException("Patient " + id + " has no open case"));

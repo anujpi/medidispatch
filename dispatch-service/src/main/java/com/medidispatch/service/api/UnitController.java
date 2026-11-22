@@ -45,7 +45,7 @@ public class UnitController {
     @ResponseStatus(HttpStatus.CREATED)
     public UnitInfo register(@RequestBody UnitRequest request) {
         return service.registerUnit(request.id(), request.type(), request.position().toLocation(),
-                request.baseId());
+                request.baseId(), request.driver());
     }
 
     /**

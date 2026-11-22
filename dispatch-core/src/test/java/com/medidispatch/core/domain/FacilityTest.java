@@ -104,6 +104,33 @@ public class FacilityTest {
         assertThrows(IllegalArgumentException.class, () -> hospital(withNull));
     }
 
+    // ---- phone ----
+
+    @Test
+    void aFacilityHasNoPhoneUntilOneIsGiven() {
+        Facility h = hospital(Set.of());
+
+        Facility withPhone = h.withPhone("+91 80 2345 6789");
+
+        assertNull(h.phone());
+        assertEquals("+91 80 2345 6789", withPhone.phone());
+        assertEquals(h.id(), withPhone.id());
+        assertEquals(h.accepting(), withPhone.accepting());
+    }
+
+    /** Switching diversion keeps the phone. */
+    @Test
+    void withAcceptingKeepsThePhone() {
+        Facility h = hospital(Set.of()).withPhone("+91 80 2345 6789");
+
+        assertEquals("+91 80 2345 6789", h.withAccepting(false).phone());
+    }
+
+    @Test
+    void anInvalidPhoneIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> hospital(Set.of()).withPhone("not a phone"));
+    }
+
     // ---- clinics ----
 
     @Test

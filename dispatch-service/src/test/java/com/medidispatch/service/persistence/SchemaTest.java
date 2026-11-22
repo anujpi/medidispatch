@@ -266,6 +266,38 @@ class SchemaTest {
         assertEquals("23505", refused.getSQLState());
     }
 
+    // ---- V3: people ----
+
+    /** Age, sex and the "comes together" rules are enforced by the database too. */
+    @Test
+    void patientDetailsAreCheckedByTheDatabase() throws SQLException {
+        String insert = "INSERT INTO patients (id, home, name, age, sex) VALUES (?, ST_Point(?, ?, 4326)::geography, ?, ?, ?)";
+        update(conn, insert, "p-ok", DELHI_LON, DELHI_LAT, "Asha Rao", 68, "FEMALE");
+
+        SQLException tooOld = assertThrows(SQLException.class,
+                () -> update(conn, insert, "p-old", DELHI_LON, DELHI_LAT, "Old Rao", 150, "FEMALE"));
+        SQLException badSex = assertThrows(SQLException.class,
+                () -> update(conn, insert, "p-sex", DELHI_LON, DELHI_LAT, "Asha Rao", 68, "ROBOT"));
+        SQLException nameOnly = assertThrows(SQLException.class, () -> update(conn,
+                "INSERT INTO patients (id, home, name) VALUES (?, ST_Point(?, ?, 4326)::geography, ?)",
+                "p-half", DELHI_LON, DELHI_LAT, "Asha Rao"));
+        assertEquals("23514", tooOld.getSQLState());
+        assertEquals("23514", badSex.getSQLState());
+        assertEquals("23514", nameOnly.getSQLState());
+    }
+
+    /** A driver's name without a phone (or the other way round) is refused. */
+    @Test
+    void aDriverNeedsBothANameAndAPhone() throws SQLException {
+        unit("u-driver", DELHI_LAT, DELHI_LON);
+
+        assertEquals(1, update(conn, "UPDATE units SET driver_name = ?, driver_phone = ? WHERE id = ?",
+                "Ravi Kumar", "+91 98450 12345", "u-driver"));
+        SQLException refused = assertThrows(SQLException.class,
+                () -> update(conn, "UPDATE units SET driver_phone = NULL WHERE id = ?", "u-driver"));
+        assertEquals("23514", refused.getSQLState());
+    }
+
     // ---- helpers ----
 
     /** @return a new connection to the test database */

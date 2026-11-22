@@ -9,7 +9,7 @@ import java.util.Set;
 /**
  * Body of {@code POST /api/facilities}:
  * {@code {"id": "h-apollo", "name": "Apollo", "kind": "HOSPITAL", "position": {"latitude": 28.56, "longitude": 77.28},
- * "capabilities": ["STROKE", "CARDIAC"], "accepting": true}}.
+ * "capabilities": ["STROKE", "CARDIAC"], "accepting": true, "phone": "+91 80 2345 6789"}}.
  *
  * @param id           the facility id, chosen by the operator
  * @param name         the name people know it by
@@ -18,13 +18,14 @@ import java.util.Set;
  * @param capabilities the specialist services it offers; missing means none (emergency department only, or a clinic)
  * @param accepting    whether its emergency department takes new patients; missing means {@code true} for a
  *                     hospital and {@code false} for a clinic
+ * @param phone        how the control room reaches it; required
  */
 public record FacilityRequest(String id, String name, FacilityKind kind, Coordinates position,
-                              Set<Capability> capabilities, Boolean accepting) {
+                              Set<Capability> capabilities, Boolean accepting, String phone) {
 
     /**
-     * @throws IllegalArgumentException if the position or kind is missing (blank id and name are refused by the
-     *                                  engine)
+     * @throws IllegalArgumentException if the position, kind or phone is missing (blank id and name, and a phone
+     *                                  that is not valid, are refused by the engine)
      */
     public FacilityRequest {
         if (position == null) {
@@ -32,6 +33,9 @@ public record FacilityRequest(String id, String name, FacilityKind kind, Coordin
         }
         if (kind == null) {
             throw new IllegalArgumentException("kind is required (HOSPITAL or CLINIC)");
+        }
+        if (phone == null || phone.isBlank()) {
+            throw new IllegalArgumentException("phone is required");
         }
         if (capabilities == null) {
             capabilities = Set.of();
@@ -46,6 +50,6 @@ public record FacilityRequest(String id, String name, FacilityKind kind, Coordin
      * @throws IllegalArgumentException if the engine refuses the values
      */
     Facility toFacility() {
-        return new Facility(id, name, position.toLocation(), kind, capabilities, accepting);
+        return new Facility(id, name, position.toLocation(), kind, capabilities, accepting, phone);
     }
 }

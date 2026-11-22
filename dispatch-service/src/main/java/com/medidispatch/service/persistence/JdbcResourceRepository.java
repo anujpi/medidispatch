@@ -1,5 +1,6 @@
 package com.medidispatch.service.persistence;
 
+import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Resource;
 import com.medidispatch.core.domain.ResourceStatus;
@@ -30,7 +31,7 @@ public class JdbcResourceRepository implements ResourceRepository {
 
     /** Every column a {@link Resource} needs, positions split back into latitude (ST_Y) and longitude (ST_X). */
     private static final String COLUMNS = """
-            id, type, base_id, status, last_seen_at, last_moved_at,
+            id, type, base_id, driver_name, driver_phone, status, last_seen_at, last_moved_at,
             ST_Y(position::geometry) AS lat, ST_X(position::geometry) AS lon,
             ST_Y(moved_from::geometry) AS from_lat, ST_X(moved_from::geometry) AS from_lon
             """;
@@ -57,12 +58,14 @@ public class JdbcResourceRepository implements ResourceRepository {
             throw new IllegalArgumentException("resource is required");
         }
         jdbc.sql("""
-                INSERT INTO units (id, type, base_id, status, position, moved_from, last_seen_at, last_moved_at)
-                VALUES (:id, :type, :base, :status,
+                INSERT INTO units (id, type, base_id, driver_name, driver_phone, status, position, moved_from,
+                                   last_seen_at, last_moved_at)
+                VALUES (:id, :type, :base, :driverName, :driverPhone, :status,
                         ST_Point(:lon, :lat, 4326)::geography, ST_Point(:fromLon, :fromLat, 4326)::geography,
                         :seen, :moved)
                 ON CONFLICT (id) DO UPDATE SET
-                    type = excluded.type, base_id = excluded.base_id, status = excluded.status,
+                    type = excluded.type, base_id = excluded.base_id, driver_name = excluded.driver_name,
+                    driver_phone = excluded.driver_phone, status = excluded.status,
                     position = excluded.position,
                     moved_from = excluded.moved_from, last_seen_at = excluded.last_seen_at,
                     last_moved_at = excluded.last_moved_at
@@ -70,6 +73,8 @@ public class JdbcResourceRepository implements ResourceRepository {
                 .param("id", r.id())
                 .param("type", r.type().name())
                 .param("base", r.baseId().orElse(null), Types.VARCHAR)
+                .param("driverName", r.driver().isPresent() ? r.driver().get().name() : null, Types.VARCHAR)
+                .param("driverPhone", r.driver().isPresent() ? r.driver().get().phone() : null, Types.VARCHAR)
                 .param("status", r.status().name())
                 .param("lon", r.location().longitude())
                 .param("lat", r.location().latitude())
@@ -177,6 +182,8 @@ public class JdbcResourceRepository implements ResourceRepository {
                 rs.getString("id"),
                 ResourceType.valueOf(rs.getString("type")),
                 rs.getString("base_id"),
+                rs.getString("driver_name") == null ? null
+                        : new Contact(rs.getString("driver_name"), rs.getString("driver_phone")),
                 ResourceStatus.valueOf(rs.getString("status")),
                 new Location(rs.getDouble("lat"), rs.getDouble("lon")),
                 new Location(rs.getDouble("from_lat"), rs.getDouble("from_lon")),

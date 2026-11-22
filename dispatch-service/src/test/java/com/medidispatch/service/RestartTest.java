@@ -4,6 +4,7 @@ import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Consciousness;
 import com.medidispatch.core.domain.Location;
+import com.medidispatch.core.domain.Patient;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.VitalsReading;
@@ -39,8 +40,8 @@ class RestartTest {
 
         try (ConfigurableApplicationContext first = start()) {
             DispatchService service = first.getBean(DispatchService.class);
-            service.registerPatient("p1", HOME);
-            service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+            service.registerPatient(new Patient("p1", HOME));
+            service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
             caseId = service.submitReading(critical("p1")).openCase().id();
             service.tick();
             tripId = service.activeTripOf("u1").orElseThrow().id();

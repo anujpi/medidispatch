@@ -21,16 +21,27 @@ import java.util.Set;
  * @param accepting    {@code true} if its emergency department takes new patients; {@code false} means it has
  *                     declared diversion (full), so ambulances should go elsewhere when they can. Always
  *                     {@code false} for a clinic
+ * @param phone        how the control room reaches it; {@code null} if not on file (see {@link Contact#checkPhone})
  */
 public record Facility(String id, String name, Location location, FacilityKind kind,
-                       Set<Capability> capabilities, boolean accepting) {
+                       Set<Capability> capabilities, boolean accepting, String phone) {
+
+    /**
+     * A facility with no phone on file.
+     *
+     * @throws IllegalArgumentException as for the full constructor
+     */
+    public Facility(String id, String name, Location location, FacilityKind kind, Set<Capability> capabilities,
+                    boolean accepting) {
+        this(id, name, location, kind, capabilities, accepting, null);
+    }
 
     /**
      * Validates the facility and copies its capabilities.
      *
      * @throws IllegalArgumentException if the id or name is blank, the location, kind or capabilities are missing,
-     *                                  the capabilities contain {@code null}, or a clinic has capabilities or is
-     *                                  accepting
+     *                                  the capabilities contain {@code null}, a clinic has capabilities or is
+     *                                  accepting, or the phone is given but not valid
      */
     public Facility {
         if (id == null || id.isBlank()) {
@@ -57,6 +68,9 @@ public record Facility(String id, String name, Location location, FacilityKind k
         }
         if (kind == FacilityKind.CLINIC && (!capabilities.isEmpty() || accepting)) {
             throw new IllegalArgumentException("a clinic has no emergency department: no capabilities, never accepting");
+        }
+        if (phone != null) {
+            Contact.checkPhone(phone);
         }
         capabilities = Set.copyOf(capabilities);
     }
@@ -107,6 +121,15 @@ public record Facility(String id, String name, Location location, FacilityKind k
      * @throws IllegalArgumentException if this is a clinic and {@code nowAccepting} is {@code true}
      */
     public Facility withAccepting(boolean nowAccepting) {
-        return new Facility(id, name, location, kind, capabilities, nowAccepting);
+        return new Facility(id, name, location, kind, capabilities, nowAccepting, phone);
+    }
+
+    /**
+     * @param newPhone how the control room reaches it
+     * @return a copy of this facility with only the phone changed
+     * @throws IllegalArgumentException if the phone is not valid
+     */
+    public Facility withPhone(String newPhone) {
+        return new Facility(id, name, location, kind, capabilities, accepting, newPhone);
     }
 }

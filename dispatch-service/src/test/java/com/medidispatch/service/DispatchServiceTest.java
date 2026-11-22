@@ -5,12 +5,16 @@ import com.medidispatch.core.domain.AssignmentStatus;
 import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Consciousness;
+import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.FacilityKind;
 import com.medidispatch.core.domain.Location;
+import com.medidispatch.core.domain.Patient;
+import com.medidispatch.core.domain.PersonDetails;
 import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.RiskBand;
+import com.medidispatch.core.domain.Sex;
 import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.core.engine.ProcessingResult;
 import com.medidispatch.service.persistence.TestDatabase;
@@ -65,8 +69,8 @@ class DispatchServiceTest {
     /** The happy path, end to end: reading, case, dispatch, accept, arrive, complete, case closed. */
     @Test
     void aCriticalPatientIsServedFromReadingToClosedCase() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
 
         ReadingResult result = service.submitReading(critical("p1"));
         assertEquals(ProcessingResult.Outcome.ACCEPTED, result.outcome());
@@ -91,12 +95,12 @@ class DispatchServiceTest {
     /** Registering the same id twice must fail instead of silently replacing the first one. */
     @Test
     void anIdCanOnlyBeRegisteredOnce() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
 
-        assertThrows(IllegalStateException.class, () -> service.registerPatient("p1", HOME));
+        assertThrows(IllegalStateException.class, () -> service.registerPatient(new Patient("p1", HOME)));
         assertThrows(IllegalStateException.class,
-                () -> service.registerUnit("u1", ResourceType.AMBULANCE_BLS, NEARBY, null));
+                () -> service.registerUnit("u1", ResourceType.AMBULANCE_BLS, NEARBY, null, null));
     }
 
     /** Unknown ids give NotFoundException (later a 404), and reads give an empty Optional. */
@@ -116,8 +120,8 @@ class DispatchServiceTest {
     /** A trip that exists but is in the wrong state gives IllegalStateException (later a 409). */
     @Test
     void arrivingBeforeAcceptingIsRefused() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -131,8 +135,8 @@ class DispatchServiceTest {
      */
     @Test
     void aRepeatedStepIsHarmless() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -150,8 +154,8 @@ class DispatchServiceTest {
     /** Only a repeat of the SAME step is forgiven: a late accept or arrive for a finished trip is still refused. */
     @Test
     void goingBackwardsIsStillRefused() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -171,9 +175,9 @@ class DispatchServiceTest {
      */
     @Test
     void aSnapshotShowsTheFleetTheOpenCasesAndTheTrips() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u2", ResourceType.NURSE, NEARBY, null);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u2", ResourceType.NURSE, NEARBY, null, null);
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p1"));
         service.tick();
 
@@ -198,10 +202,10 @@ class DispatchServiceTest {
     @Test
     void fiftyPatientsAtOnceWhileTheLoopRuns() throws Exception {
         for (int i = 0; i < 50; i++) {
-            service.registerPatient("p" + i, HOME);
+            service.registerPatient(new Patient("p" + i, HOME));
         }
         for (int i = 0; i < 10; i++) {
-            service.registerUnit("u" + i, ResourceType.AMBULANCE_ALS, NEARBY, null);
+            service.registerUnit("u" + i, ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         }
 
         ExecutorService pool = Executors.newFixedThreadPool(51);
@@ -262,8 +266,8 @@ class DispatchServiceTest {
 
     /** p1 at HOME, ambulance u1 sent to them, accepted and arrived; returns the trip id. */
     private String arrivedTrip() {
-        service.registerPatient("p1", HOME);
-        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p1", HOME));
+        service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p1"));
         service.tick();
         String tripId = service.activeTripOf("u1").orElseThrow().id();
@@ -318,10 +322,10 @@ class DispatchServiceTest {
     void aUnitsBaseMustExist() {
         service.registerFacility(Facility.clinic("c1", "Lane Clinic", kmNorth(1)));
 
-        assertEquals("c1", service.registerUnit("n1", ResourceType.NURSE, NEARBY, "c1").baseId());
-        assertNull(service.registerUnit("n2", ResourceType.NURSE, NEARBY, null).baseId());
+        assertEquals("c1", service.registerUnit("n1", ResourceType.NURSE, NEARBY, "c1", null).baseId());
+        assertNull(service.registerUnit("n2", ResourceType.NURSE, NEARBY, null, null).baseId());
         assertThrows(IllegalArgumentException.class,
-                () -> service.registerUnit("n3", ResourceType.NURSE, NEARBY, "nowhere"));
+                () -> service.registerUnit("n3", ResourceType.NURSE, NEARBY, "nowhere", null));
         assertTrue(service.findUnit("n3").isEmpty());
     }
 
@@ -407,10 +411,10 @@ class DispatchServiceTest {
     void aFacilitySeesOnlyItsOwnFleet() {
         service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
         service.registerFacility(Facility.clinic("c-lane", "Lane Clinic", kmNorth(1)));
-        service.registerUnit("amb-2", ResourceType.AMBULANCE_BLS, NEARBY, "h-apollo");
-        service.registerUnit("amb-1", ResourceType.AMBULANCE_ALS, NEARBY, "h-apollo");
-        service.registerUnit("nurse-1", ResourceType.NURSE, NEARBY, "c-lane");
-        service.registerUnit("free-1", ResourceType.NURSE, NEARBY, null);
+        service.registerUnit("amb-2", ResourceType.AMBULANCE_BLS, NEARBY, "h-apollo", null);
+        service.registerUnit("amb-1", ResourceType.AMBULANCE_ALS, NEARBY, "h-apollo", null);
+        service.registerUnit("nurse-1", ResourceType.NURSE, NEARBY, "c-lane", null);
+        service.registerUnit("free-1", ResourceType.NURSE, NEARBY, null, null);
 
         List<String> ids = new ArrayList<>();
         for (UnitInfo u : service.fleetOf("h-apollo")) {
@@ -481,8 +485,8 @@ class DispatchServiceTest {
         service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
         String first = arrivedTrip();
         service.startTransport(first, Set.of());
-        service.registerPatient("p2", HOME);
-        service.registerUnit("u2", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.registerPatient(new Patient("p2", HOME));
+        service.registerUnit("u2", ResourceType.AMBULANCE_ALS, NEARBY, null, null);
         service.submitReading(critical("p2"));
         service.tick();
         String second = service.activeTripOf("u2").orElseThrow().id();
@@ -494,5 +498,51 @@ class DispatchServiceTest {
 
         List<InboundPatient> inbound = service.inboundTo("h-apollo");
         assertEquals(List.of(second, first), List.of(inbound.get(0).tripId(), inbound.get(1).tripId()));
+    }
+
+    // ---- people (B1) ----
+
+    private static final PersonDetails ASHA = new PersonDetails("Asha Rao", 68, Sex.FEMALE);
+    private static final Contact SON = new Contact("Vikram Rao", "+91 98450 12345");
+    private static final Contact RAVI = new Contact("Ravi Kumar", "+91 98450 67890");
+
+    /** The full record, emergency contact included, is there for whoever looks the patient up. */
+    @Test
+    void aPatientsFullRecordCanBeLookedUp() {
+        service.registerPatient(new Patient("p1", HOME, ASHA, SON));
+
+        PatientInfo found = service.findPatient("p1").orElseThrow();
+
+        assertEquals("Asha Rao", found.name());
+        assertEquals(68, found.age());
+        assertEquals(Sex.FEMALE, found.sex());
+        assertEquals(SON, found.emergencyContact());
+        assertTrue(service.findPatient("nobody").isEmpty());
+    }
+
+    /** The case list and the hospital's pre-alert say who the patient is; the unit says who drives it. */
+    @Test
+    void theCaseThePreAlertAndTheUnitShowThePeople() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
+        service.registerPatient(new Patient("p1", HOME, ASHA, SON));
+        UnitInfo unit = service.registerUnit("u1", ResourceType.AMBULANCE_ALS, NEARBY, "h-apollo", RAVI);
+        service.submitReading(critical("p1"));
+        service.tick();
+
+        CaseInfo openCase = service.openCaseOf("p1").orElseThrow();
+        assertEquals("Asha Rao", openCase.patientName());
+        assertEquals(68, openCase.age());
+        assertEquals(Sex.FEMALE, openCase.sex());
+        assertEquals(RAVI, unit.driver());
+        assertEquals(RAVI, service.findUnit("u1").orElseThrow().driver());
+
+        String tripId = service.activeTripOf("u1").orElseThrow().id();
+        service.acceptTrip(tripId);
+        service.arrive(tripId);
+        service.startTransport(tripId, Set.of());
+        InboundPatient coming = service.inboundTo("h-apollo").get(0);
+        assertEquals("Asha Rao", coming.patientName());
+        assertEquals(68, coming.age());
+        assertEquals(Sex.FEMALE, coming.sex());
     }
 }

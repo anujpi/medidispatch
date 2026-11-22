@@ -1,13 +1,16 @@
 package com.medidispatch.service.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.medidispatch.core.domain.Facility;
+import com.medidispatch.core.domain.Location;
 import com.medidispatch.service.DispatchService;
 import com.medidispatch.service.persistence.TestDatabaseConfig;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -41,23 +44,39 @@ class ApiTest {
     @Autowired
     private DispatchService service;
 
+    /** The clinic every test unit belongs to (a unit needs an owner). Far out at sea, so no test ever picks it. */
+    private static final String BASE = "api-base";
+
+    /**
+     * Makes sure the shared base exists. Not once per class: other test classes empty the same database between
+     * this class's tests, and a clinic is never a hospital destination, so it never changes a test's outcome.
+     */
+    @BeforeEach
+    void baseClinic() {
+        if (service.findFacility(BASE).isEmpty()) {
+            service.registerFacility(Facility.clinic(BASE, "Test Base", new Location(0, 0)).withPhone("+91 80 1111 2222"));
+        }
+    }
+
     // Text blocks (""" ... """) are multi-line strings; formatted(...) fills in each %s / %d in order.
     private static String patient(String id, double latitude, double longitude) {
         return """
-                {"id": "%s", "home": {"latitude": %s, "longitude": %s}}
-                """.formatted(id, latitude, longitude);
+                {"id": "%s", "home": {"latitude": %s, "longitude": %s}, "name": "Patient %s", "age": 68,
+                 "sex": "FEMALE"}
+                """.formatted(id, latitude, longitude, id);
     }
 
     private static String unit(String id, String type, double latitude, double longitude) {
         return """
-                {"id": "%s", "type": "%s", "position": {"latitude": %s, "longitude": %s}}
-                """.formatted(id, type, latitude, longitude);
+                {"id": "%s", "type": "%s", "position": {"latitude": %s, "longitude": %s}, "baseId": "%s",
+                 "driver": {"name": "Ravi Kumar", "phone": "+91 98450 12345"}}
+                """.formatted(id, type, latitude, longitude, BASE);
     }
 
     private static String hospital(String id, double latitude, double longitude, String capabilities) {
         return """
                 {"id": "%s", "name": "Hospital %s", "kind": "HOSPITAL",
-                 "position": {"latitude": %s, "longitude": %s}, "capabilities": %s}
+                 "position": {"latitude": %s, "longitude": %s}, "capabilities": %s, "phone": "+91 80 2345 6789"}
                 """.formatted(id, id, latitude, longitude, capabilities);
     }
 
@@ -295,7 +314,7 @@ class ApiTest {
         http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"id": "api-u-nobase", "type": "NURSE", "position": {"latitude": 13.08, "longitude": 80.27},
-                                 "baseId": "api-nowhere"}
+                                 "baseId": "api-nowhere", "driver": {"name": "Ravi Kumar", "phone": "+91 98450 12345"}}
                                 """))
                 .andExpect(status().isBadRequest());
         http.perform(get("/api/units/api-u-nobase")).andExpect(status().isNotFound());
@@ -317,7 +336,7 @@ class ApiTest {
         http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"id": "kol-u1", "type": "AMBULANCE_ALS",
-                                 "position": {"latitude": 22.5750, "longitude": 88.3650}, "baseId": "kol-h1"}
+                                 "position": {"latitude": 22.5750, "longitude": 88.3650}, "baseId": "kol-h1", "driver": {"name": "Ravi Kumar", "phone": "+91 98450 12345"}}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.baseId").value("kol-h1"));
@@ -372,7 +391,7 @@ class ApiTest {
         http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"id": "pune-u1", "type": "AMBULANCE_ALS",
-                                 "position": {"latitude": 18.5210, "longitude": 73.8570}, "baseId": "pune-h1"}
+                                 "position": {"latitude": 18.5210, "longitude": 73.8570}, "baseId": "pune-h1", "driver": {"name": "Ravi Kumar", "phone": "+91 98450 12345"}}
                                 """))
                 .andExpect(status().isCreated());
 
@@ -414,5 +433,81 @@ class ApiTest {
 
         http.perform(get("/api/facilities/pune-nowhere/units")).andExpect(status().isNotFound());
         http.perform(get("/api/facilities/pune-nowhere/inbound")).andExpect(status().isNotFound());
+    }
+
+    // ---- people (B1) ----
+
+    /** The full patient record over HTTP, emergency contact included; an unknown patient is 404. */
+    @Test
+    void aPatientsRecordOverHttp() throws Exception {
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "rec-p1", "home": {"latitude": 12.93, "longitude": 77.62}, "name": "Asha Rao",
+                                 "age": 68, "sex": "FEMALE",
+                                 "emergencyContact": {"name": "Vikram Rao", "phone": "+91 98450 12345"}}
+                                """))
+                .andExpect(status().isCreated());
+
+        http.perform(get("/api/patients/rec-p1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Asha Rao"))
+                .andExpect(jsonPath("$.age").value(68))
+                .andExpect(jsonPath("$.sex").value("FEMALE"))
+                .andExpect(jsonPath("$.emergencyContact.phone").value("+91 98450 12345"));
+        http.perform(get("/api/patients/rec-nobody")).andExpect(status().isNotFound());
+    }
+
+    /** What the API requires: a patient's name, age and sex; a unit's base and driver; a facility's phone. */
+    @Test
+    void missingPeopleDataIsRejected() throws Exception {
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-p1", "home": {"latitude": 12.93, "longitude": 77.62}, "age": 68, "sex": "FEMALE"}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-p2", "home": {"latitude": 12.93, "longitude": 77.62}, "name": "Asha",
+                                 "age": 150, "sex": "FEMALE"}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-u1", "type": "NURSE", "position": {"latitude": 12.93, "longitude": 77.62},
+                                 "baseId": "api-base"}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-u2", "type": "NURSE", "position": {"latitude": 12.93, "longitude": 77.62},
+                                 "driver": {"name": "Ravi Kumar", "phone": "+91 98450 12345"}}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-u3", "type": "NURSE", "position": {"latitude": 12.93, "longitude": 77.62},
+                                 "baseId": "api-base", "driver": {"name": "Ravi Kumar", "phone": "not a phone"}}
+                                """))
+                .andExpect(status().isBadRequest());
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "req-h1", "name": "No Phone", "kind": "HOSPITAL",
+                                 "position": {"latitude": 12.93, "longitude": 77.62}}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        http.perform(get("/api/units/req-u1")).andExpect(status().isNotFound());
+        http.perform(get("/api/facilities/req-h1")).andExpect(status().isNotFound());
+    }
+
+    /** A complete unit shows its owner and driver. */
+    @Test
+    void aUnitShowsItsDriver() throws Exception {
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content(unit("drv-u1", "AMBULANCE_BLS", 12.93, 77.62)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.baseId").value(BASE))
+                .andExpect(jsonPath("$.driver.name").value("Ravi Kumar"))
+                .andExpect(jsonPath("$.driver.phone").value("+91 98450 12345"));
     }
 }

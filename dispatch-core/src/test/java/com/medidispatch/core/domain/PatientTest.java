@@ -49,4 +49,34 @@ public class PatientTest {
 
         assertEquals(BANGALORE, p.location());
     }
+
+    // ---------- who the patient is ----------
+
+    @Test
+    void anAnonymousPatientHasNoDetailsAndNoEmergencyContact() {
+        Patient p = new Patient("p1", BANGALORE);
+
+        assertTrue(p.details().isEmpty());
+        assertTrue(p.emergencyContact().isEmpty());
+    }
+
+    @Test
+    void detailsAndEmergencyContactAreKept() {
+        PersonDetails asha = new PersonDetails("Asha Rao", 68, Sex.FEMALE);
+        Contact son = new Contact("Vikram Rao", "+91 98450 12345");
+
+        Patient p = new Patient("p1", BANGALORE, asha, son);
+
+        assertEquals(asha, p.details().orElseThrow());
+        assertEquals(son, p.emergencyContact().orElseThrow());
+    }
+
+    /** The emergency contact is optional on its own: not everyone has one on file. */
+    @Test
+    void detailsWithoutAnEmergencyContactAreFine() {
+        Patient p = new Patient("p1", BANGALORE, new PersonDetails("Asha Rao", 68, Sex.FEMALE), null);
+
+        assertTrue(p.details().isPresent());
+        assertTrue(p.emergencyContact().isEmpty());
+    }
 }

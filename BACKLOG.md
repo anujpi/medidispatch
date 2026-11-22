@@ -63,6 +63,9 @@ Ordered roughly by priority inside each group.
 - [ ] **Hospital access control.** The hospital endpoints (diversion, adding units, fleet, inbound patients) will
       have no login at first, so any caller can act for any hospital. With roles (Spring Security, week 3), a
       hospital user may only touch its own facility, and only the operator may add facilities.
+      Since B1 this also covers personal data: patient names, ages and emergency contacts
+      (`GET /api/patients/{id}`), and drivers' phone numbers (in every unit view and the live feed). All synthetic
+      today, but nothing stops anyone reading them until the security piece.
 
 ## Small cleanups
 

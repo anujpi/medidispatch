@@ -233,7 +233,8 @@ Web requests arrive on many threads at once, so every method holds one shared lo
 
 | Endpoint | What it does |
 |---|---|
-| `POST /api/patients`, `POST /api/units` | register a patient or a unit (201); a unit can name its base hospital or clinic |
+| `POST /api/patients`, `POST /api/units` | register a patient (name, age, sex, optional emergency contact) or a unit (the hospital or clinic that owns it, and its driver) (201) |
+| `GET /api/patients/{id}` | a patient's full record, including the emergency contact |
 | `POST /api/readings` | one vitals reading; always 200 with the outcome (`ACCEPTED`, `DUPLICATE`, `TOO_OLD`, ...) |
 | `GET /api/units/{id}/trip` | the crew app asks "do I have a job?" (200 with the trip, or 204) |
 | `PUT /api/units/{id}/position` | the crew phone reports where it is (204) |
@@ -272,7 +273,9 @@ The hospital side is open over HTTP: the operator registers hospitals and clinic
 
 Each hospital also sees its own fleet and a **pre-alert** of the patients on their way in: how urgent each one is, what they need (for example a stroke team), where the ambulance is, an estimated arrival time and their latest vitals. The arrival time comes from the ambulance's live position (a straight line at 40 km/h for now), so it counts down as the ambulance reports in, and the patient leaves the list at the handover.
 
-Next: the simulator driving the running service over HTTP, with hospitals, clinics and units based at them. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**People.** Every unit belongs to a hospital or clinic and has a driver with a phone number, every patient has a name, age and sex (and optionally an emergency contact), and every hospital has a phone number. The engine never uses any of this to dispatch; it is there for the people: the control room can call the driver, and the hospital's pre-alert reads "Asha Rao, 68, F" instead of an id. All of it is synthetic, and it is not protected yet: anyone who can reach the service can read it until the security step.
+
+Next: the simulator driving the running service over HTTP, as a city in Bangalore, then a live map of it on real streets, then security. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 

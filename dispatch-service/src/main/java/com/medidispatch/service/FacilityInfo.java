@@ -17,9 +17,10 @@ import java.util.Set;
  * @param capabilities the specialist services it offers (always empty for a clinic)
  * @param accepting    whether its emergency department takes new patients ({@code false} = on diversion; always
  *                     {@code false} for a clinic)
+ * @param phone        how the control room reaches it, or {@code null} if not on file
  */
 public record FacilityInfo(String id, String name, FacilityKind kind, double latitude, double longitude,
-                           Set<Capability> capabilities, boolean accepting) {
+                           Set<Capability> capabilities, boolean accepting, String phone) {
 
     /**
      * @param f the engine's facility
@@ -27,6 +28,6 @@ public record FacilityInfo(String id, String name, FacilityKind kind, double lat
      */
     static FacilityInfo from(Facility f) {
         return new FacilityInfo(f.id(), f.name(), f.kind(), f.location().latitude(), f.location().longitude(),
-                f.capabilities(), f.accepting());
+                f.capabilities(), f.accepting(), f.phone());
     }
 }

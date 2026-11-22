@@ -252,7 +252,7 @@ public class ResourceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new Resource("r1", ResourceType.AMBULANCE_BLS, BANGALORE, " "));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, "", ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, "", null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
     }
 
     // ---- restore: rebuilding a stored unit (used by storage adapters) ----
@@ -260,7 +260,7 @@ public class ResourceTest {
     /** restore brings back every field, including the movement reference point and both times. */
     @Test
     void restoreRebuildsEveryField() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, "clinic-7", ResourceStatus.OFFLINE, CHENNAI,
+        Resource r = Resource.restore("u1", ResourceType.NURSE, "clinic-7", null, ResourceStatus.OFFLINE, CHENNAI,
                 BANGALORE, T0, T0.minusSeconds(60));
 
         assertEquals("u1", r.id());
@@ -276,7 +276,7 @@ public class ResourceTest {
     /** null times mean "never", exactly like a new unit. */
     @Test
     void restoreKeepsNeverAsEmpty() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null);
+        Resource r = Resource.restore("u1", ResourceType.NURSE, null, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null);
 
         assertTrue(r.lastSeenAt().isEmpty());
         assertTrue(r.lastMovedAt().isEmpty());
@@ -288,7 +288,7 @@ public class ResourceTest {
      */
     @Test
     void aRestoredUnitMeasuresMovementFromItsSavedReferencePoint() {
-        Resource r = Resource.restore("u1", ResourceType.AMBULANCE_ALS, null, ResourceStatus.ASSIGNED, JITTER, HERE, T0, T0);
+        Resource r = Resource.restore("u1", ResourceType.AMBULANCE_ALS, null, null, ResourceStatus.ASSIGNED, JITTER, HERE, T0, T0);
 
         r.reportLocation(STEP, T0.plusSeconds(10));
 
@@ -299,7 +299,7 @@ public class ResourceTest {
     /** A restored unit still obeys its rules: OFFLINE cannot go straight to ASSIGNED. */
     @Test
     void aRestoredUnitStillObeysTheRules() {
-        Resource r = Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.OFFLINE, HERE, HERE, null, null);
+        Resource r = Resource.restore("u1", ResourceType.NURSE, null, null, ResourceStatus.OFFLINE, HERE, HERE, null, null);
 
         assertThrows(IllegalStateException.class, () -> r.transitionTo(ResourceStatus.ASSIGNED));
         assertEquals(ResourceStatus.OFFLINE, r.status());
@@ -309,14 +309,34 @@ public class ResourceTest {
     @Test
     void restoreRejectsMissingValues() {
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, null, null, HERE, HERE, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, null, null, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, null, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, null, ResourceStatus.AVAILABLE, HERE, null, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore(" ", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+                () -> Resource.restore(" ", ResourceType.NURSE, null, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", null, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+                () -> Resource.restore("u1", null, null, null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
         assertThrows(IllegalArgumentException.class,
-                () -> Resource.restore("u1", ResourceType.NURSE, null, ResourceStatus.AVAILABLE, null, HERE, null, null));
+                () -> Resource.restore("u1", ResourceType.NURSE, null, null, ResourceStatus.AVAILABLE, null, HERE, null, null));
+    }
+
+    // ---- driver: who drives the unit ----
+
+    @Test
+    void aUnitWithoutADriverHasNone() {
+        assertEquals(Optional.empty(), newResource().driver());
+    }
+
+    @Test
+    void theDriverIsKeptByTheConstructorAndByRestore() {
+        Contact ravi = new Contact("Ravi Kumar", "+91 98450 12345");
+
+        Resource created = new Resource("r1", ResourceType.AMBULANCE_ALS, BANGALORE, "h-apollo", ravi);
+        Resource restored = Resource.restore("r1", ResourceType.AMBULANCE_ALS, "h-apollo", ravi,
+                ResourceStatus.ASSIGNED, BANGALORE, BANGALORE, null, null);
+
+        assertEquals(Optional.of(ravi), created.driver());
+        assertEquals(Optional.of(ravi), restored.driver());
+        assertEquals(Optional.of("h-apollo"), restored.baseId());
     }
 }
