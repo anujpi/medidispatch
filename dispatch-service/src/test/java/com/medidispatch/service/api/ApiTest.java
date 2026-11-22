@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -509,5 +510,18 @@ class ApiTest {
                 .andExpect(jsonPath("$.baseId").value(BASE))
                 .andExpect(jsonPath("$.driver.name").value("Ravi Kumar"))
                 .andExpect(jsonPath("$.driver.phone").value("+91 98450 12345"));
+    }
+
+    // ---- the live map page (M1) ----
+
+    /** Spring Boot serves static/map.html as it is; the page listens to the live feed. */
+    @Test
+    void theLiveMapPageIsServed() throws Exception {
+        String page = http.perform(get("/map.html"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(page.contains("new EventSource('/api/live')"), "the page must listen to the live feed");
+        assertTrue(page.contains("tile.openstreetmap.org"), "the page must draw OpenStreetMap streets");
     }
 }

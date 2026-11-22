@@ -39,3 +39,5 @@ build/
 .DS_Store
 
 .idea/
+### MediDispatch: downloaded map data and the road graph built from it (large; rebuilt with ImportBangalore) ###
+data/

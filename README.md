@@ -279,7 +279,11 @@ Each hospital also sees its own fleet and a **pre-alert** of the patients on the
 
 The crews take serious patients to hospital: after their time on scene, an ambulance with a HIGH or CRITICAL patient says what the patient needs (for example a stroke unit, or paediatrics for a child), the service picks the hospital, and the ambulance drives there and hands over. The patient's vitals stay real all the way in, so the hospital's pre-alert shows what is coming. Afterwards every unit drives back to its own hospital or clinic, available for new calls on the way.
 
-Next: a live map of the city on real streets, then security. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**A live map.** Open `http://localhost:8080/map.html` while the city runs and watch it on real OpenStreetMap streets: the hospitals (greyed out while on diversion) and clinics, patients in trouble coloured by urgency, ambulances moving with a line to their patient, turning red when they head for a hospital, and a side panel with the counts and each hospital's incoming patients. The page simply listens to the live feed, so the backend did not change.
+
+**Routing has started: Bangalore's real roads as a graph.** Today everything moves and is measured in straight lines, so the nearest ambulance "as the crow flies" can be on the wrong side of a lake. The new `dispatch-routing` module turns OpenStreetMap's road data for Bangalore (about 400,000 road points and 860,000 one-direction road pieces, one-way streets and roundabouts included) into a compact graph stored in arrays, keeps only the part where every point can be driven to and back (98.8% of it), and can snap any address to the nearest road. Next: the fastest route on it (Dijkstra, then A*), a traffic model, and then dispatch, ETAs, the simulator and the map all using real drive times.
+
+Next after routing: security (login, roles, and each hospital seeing only its own patients and units). Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -355,7 +359,9 @@ curl -N localhost:8080/api/live
 
 A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5433 on your machine, so it does not clash with a locally installed Postgres on 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). Start it before the service: the service connects at startup and Flyway brings the schema up to date (on a server, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` instead). Everything is stored there, so the service can be restarted without losing anything. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
-To run the Bangalore city against the real service: wipe the database (`docker compose down -v`, then `docker compose up -d`), start the service (`DispatchServiceApplication`), then run `HttpSimulatorMain` in `dispatch-sim` (optional arguments: the service address, default `http://localhost:8080`, and the speed, default 10). In IntelliJ, reload the Maven projects once first (the simulator uses Jackson), and use the run configuration's Program arguments for the speed (for example `http://localhost:8080 30`). It prints a status line every 10 seconds; at speed 10 the first patient reaches a hospital after about four or five minutes. `curl.exe -N localhost:8080/api/live` shows the live picture, `curl.exe localhost:8080/api/facilities/blr-h-jayanagar/units` a hospital's fleet, and `curl.exe localhost:8080/api/facilities/blr-h-jayanagar/inbound` its pre-alert, with the ETA counting down. To run the city again, wipe the database first: set-up refuses one that already holds a city.
+To run the Bangalore city against the real service: wipe the database (`docker compose down -v`, then `docker compose up -d`), start the service (`DispatchServiceApplication`), then run `HttpSimulatorMain` in `dispatch-sim` (optional arguments: the service address, default `http://localhost:8080`, and the speed, default 10). In IntelliJ, reload the Maven projects once first (the simulator uses Jackson), and use the run configuration's Program arguments for the speed (for example `http://localhost:8080 30`). It prints a status line every 10 seconds; at speed 10 the first patient reaches a hospital after about four or five minutes. `curl.exe -N localhost:8080/api/live` shows the live picture, `curl.exe localhost:8080/api/facilities/blr-h-jayanagar/units` a hospital's fleet, and `curl.exe localhost:8080/api/facilities/blr-h-jayanagar/inbound` its pre-alert, with the ETA counting down. To run the city again, wipe the database first: set-up refuses one that already holds a city. To watch it, open `http://localhost:8080/map.html` (Ctrl+F5 if your browser shows an old version).
+
+The road graph is not in git (it is large and can be rebuilt). To build it: download Bangalore's drivable roads from the Overpass API into `data/bangalore-roads.json` (the query is in `CLAUDE.md`, under Routing), then run `ImportBangalore` in `dispatch-routing` with the project root as the working directory; it writes `data/bangalore.graph` and reports how much of the network it kept. Map data © OpenStreetMap contributors (ODbL).
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -415,6 +421,11 @@ medidispatch/
                               LiveSimulation, LiveEngine, LivePatient, LiveUnit, LiveConfig, ScaledClock (live,
                               endless, threaded), SimulatedPatient, SimulatedUnit, SimulationConfig, CityMap,
                               MetricsCollector, SimulationReport, WorldSnapshot, EventLog, SimulatorMain
+  dispatch-routing/           road network and routing: OpenStreetMap import, graph in arrays, cleanup, snapping
+    src/main/java/com/medidispatch/routing/
+                              RoadClass, RoadGraph, GraphBuilder, OverpassImport, GraphCleanup, NearestNode,
+                              GraphFile, ImportBangalore (one-off: JSON -> data/bangalore.graph)
+  data/                       downloaded map data and the graph built from it (not in git; see Getting started)
   dispatch-sim-fx/            JavaFX window for the simulator
     src/main/java/com/medidispatch/sim/fx/
                               SimulatorLauncher (run this), SimulatorApp (window and animation loop), MapView (canvas

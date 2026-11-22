@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediDispatch live map</title>
+<!--
+  The live map: a viewer for the service's live feed (GET /api/live, a full picture every second), drawn on
+  OpenStreetMap streets with Leaflet. Served by Spring Boot from static/, so it needs no controller.
+  Everything shown comes from the feed; nothing here changes anything in the service.
+
+  Safety: names and phone numbers come from the API, so they are always inserted as TEXT (textContent), never as
+  HTML: a name like "<script>" must show as those characters, not run.
+  ponytail: OpenStreetMap's public tile servers are fine for development and a demo (light use, credited);
+  production needs its own tile server or a paid provider. No login yet, like the rest of the API (BACKLOG).
+-->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  :root {
+    --panel: #14181f; --panel-2: #1d232c; --text: #e8ebef; --muted: #9aa3ad; --line: #2c3440;
+    --medium: #e0b400; --high: #f07c00; --critical: #d62828; --low: #8a8a8a;
+    --available: #2a9d4b; --assigned: #2f6fde; --offline: #8a8f96; --hospital: #c8102e; --clinic: #11998e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; background: var(--panel); color: var(--text); }
+  #map { flex: 1; height: 100%; }
+  #panel { width: 320px; height: 100%; overflow-y: auto; padding: 16px; background: var(--panel);
+           border-left: 1px solid var(--line); }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
+  #connection { font-size: 12px; color: var(--muted); }
+  #connection.live::before { content: "\25CF  "; color: var(--available); }
+  #connection.down::before { content: "\25CF  "; color: var(--critical); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hospital-row { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-bottom: 6px;
+                  background: var(--panel-2); border-radius: 8px; cursor: pointer; }
+  .hospital-row:hover { outline: 1px solid var(--line); }
+  .hospital-row small { color: var(--muted); display: block; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 10px; white-space: nowrap; align-self: center; }
+  .tag.open { background: #1f3d2a; color: #7fdc9c; }
+  .tag.diverting { background: #45202a; color: #ff9aa8; }
+  .legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; color: var(--muted); font-size: 12px; }
+  .swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+
+  /* markers (Leaflet divIcons: plain HTML, styled here) */
+  /* every icon is centred on its point (iconSize null puts the icon's top-left corner there) */
+  .facility { display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700;
+              border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); transform: translate(-50%, -50%); }
+  .facility.hospital { width: 26px; height: 26px; border-radius: 6px; background: var(--hospital); font-size: 14px; }
+  .facility.hospital.diverting { background: #7d7d7d; }
+  .facility.clinic { width: 20px; height: 20px; border-radius: 50%; background: var(--clinic); font-size: 11px; }
+  .case { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px rgba(0,0,0,.6);
+          transform: translate(-50%, -50%); }
+  .case.MEDIUM { background: var(--medium); } .case.HIGH { background: var(--high); }
+  .case.CRITICAL { background: var(--critical); } .case.LOW { background: var(--low); }
+  .case.waiting { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { scale: 1.5; } }                   /* "scale", so the centring transform stays */
+  .unit { padding: 1px 4px; border-radius: 4px; color: #fff; font-size: 10px; font-weight: 700;
+          border: 1px solid rgba(255,255,255,.8); white-space: nowrap; transform: translate(-50%, -50%);
+          display: inline-block; }
+  .unit.AVAILABLE { background: var(--available); } .unit.ASSIGNED { background: var(--assigned); }
+  .unit.OFFLINE { background: var(--offline); }
+  .popup b { display: block; margin-bottom: 2px; }
+  .popup div { color: #444; }
+
+  @media (max-width: 760px) {
+    body { flex-direction: column; }
+    #map { height: 60%; flex: none; }
+    #panel { width: 100%; height: 40%; border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<aside id="panel">
+  <h1>MediDispatch live map</h1>
+  <div id="connection" class="down">connecting…</div>
+
+  <h2>Right now</h2>
+  <div class="grid">
+    <div class="stat"><b id="units-available">0</b><span>units available</span></div>
+    <div class="stat"><b id="units-busy">0</b><span>units busy</span></div>
+    <div class="stat"><b id="cases-open">0</b><span>open cases</span></div>
+    <div class="stat"><b id="cases-critical">0</b><span>critical</span></div>
+    <div class="stat"><b id="trips-active">0</b><span>trips under way</span></div>
+    <div class="stat"><b id="trips-transporting">0</b><span>to hospital</span></div>
+  </div>
+
+  <h2>Hospitals</h2>
+  <div id="hospitals"></div>
+
+  <h2>Legend</h2>
+  <div class="legend">
+    <div><span class="swatch" style="background:var(--critical)"></span>critical case (pulses while waiting)</div>
+    <div><span class="swatch" style="background:var(--high)"></span>high</div>
+    <div><span class="swatch" style="background:var(--medium)"></span>medium</div>
+    <div><span class="swatch" style="background:var(--available)"></span>unit available</div>
+    <div><span class="swatch" style="background:var(--assigned)"></span>unit on a trip</div>
+    <div><span class="swatch" style="background:var(--offline)"></span>unit offline</div>
+    <div><span class="swatch" style="background:var(--hospital);border-radius:3px"></span>hospital (grey: diversion)</div>
+    <div><span class="swatch" style="background:var(--clinic)"></span>clinic</div>
+  </div>
+</aside>
+
+<script>
+  // ---- the map: OpenStreetMap streets, starting over Bangalore ----
+  const map = L.map('map').setView([12.97, 77.59], 12);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  // markers and lines by id, so each picture updates them in place instead of redrawing everything
+  const facilityMarkers = new Map();
+  const caseMarkers = new Map();
+  const unitMarkers = new Map();
+  const tripLines = new Map();
+  let fitted = false;
+
+  const UNIT_LABEL = { AMBULANCE_ALS: 'ALS', AMBULANCE_BLS: 'BLS', NURSE: 'N', DOCTOR: 'D', COURIER: 'C' };
+  const TRIP_COLOUR = { ASSIGNED: '#8fb3ff', EN_ROUTE: '#2f6fde', ARRIVED: '#2f6fde', TRANSPORTING: '#c8102e' };
+
+  // ---- safe HTML building: every value goes in as text ----
+  function node(tag, className, text) {
+    const n = document.createElement(tag);
+    if (className) n.className = className;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
+  }
+
+  function popup(title, lines) {
+    const box = node('div', 'popup');
+    box.appendChild(node('b', null, title));
+    for (const line of lines) {
+      if (line) box.appendChild(node('div', null, line));
+    }
+    return box;
+  }
+
+  // creates the marker the first time an id is seen, moves and refreshes it after that
+  function upsert(store, id, latLng, html, className, data, popupFor) {
+    let marker = store.get(id);
+    if (!marker) {
+      marker = L.marker(latLng, { icon: L.divIcon({ html: '', className: '' }) }).addTo(map);
+      marker.bindPopup(() => popupFor(marker.data));
+      store.set(id, marker);
+    }
+    marker.data = data;
+    marker.setLatLng(latLng);
+    if (marker.shown !== className + '|' + html) {           // only rebuild the icon when its look changes
+      const div = document.createElement('div');
+      div.className = className;
+      div.textContent = html;
+      marker.setIcon(L.divIcon({ html: div, className: '', iconSize: null }));
+      marker.shown = className + '|' + html;
+    }
+    return marker;
+  }
+
+  // removes markers whose ids are no longer in the picture
+  function prune(store, seen) {
+    for (const [id, layer] of store) {
+      if (!seen.has(id)) {
+        map.removeLayer(layer);
+        store.delete(id);
+      }
+    }
+  }
+
+  // ---- one picture from the feed ----
+  function render(s) {
+    const facilities = new Map(s.facilities.map(f => [f.id, f]));
+    const cases = new Map(s.openCases.map(c => [c.id, c]));
+    const units = new Map(s.units.map(u => [u.id, u]));
+    const inbound = new Map();
+    for (const t of s.activeTrips) {
+      if (t.status === 'TRANSPORTING' && t.hospitalId) {
+        inbound.set(t.hospitalId, (inbound.get(t.hospitalId) || 0) + 1);
+      }
+    }
+
+    for (const f of s.facilities) {
+      const hospital = f.kind === 'HOSPITAL';
+      const cls = 'facility ' + (hospital ? 'hospital' : 'clinic') + (hospital && !f.accepting ? ' diverting' : '');
+      upsert(facilityMarkers, f.id, [f.latitude, f.longitude], hospital ? 'H' : '+', cls,
+        { ...f, inbound: inbound.get(f.id) || 0 },
+        d => popup(d.name, [
+          d.kind === 'HOSPITAL' ? (d.accepting ? 'Accepting patients' : 'ON DIVERSION') : 'Clinic (no emergency department)',
+          d.capabilities.length ? 'Services: ' + d.capabilities.join(', ') : null,
+          d.kind === 'HOSPITAL' ? 'Patients on the way in: ' + d.inbound : null,
+          'Phone: ' + (d.phone || '-')
+        ])).setZIndexOffset(1000);
+    }
+    prune(facilityMarkers, facilities);
+
+    for (const c of s.openCases) {
+      const cls = 'case ' + c.band + (c.status === 'ALERTED' ? ' waiting' : '');
+      upsert(caseMarkers, c.id, [c.latitude, c.longitude], '', cls, c,
+        d => popup(d.patientName ? d.patientName + ', ' + d.age + ' ' + (d.sex || '').charAt(0) : d.patientId, [
+          d.band + ' - ' + d.status,
+          'Patient ' + d.patientId,
+          'Case opened ' + new Date(d.openedAt).toLocaleTimeString()
+        ])).setZIndexOffset(500);
+    }
+    prune(caseMarkers, cases);
+
+    for (const u of s.units) {
+      upsert(unitMarkers, u.id, [u.latitude, u.longitude], UNIT_LABEL[u.type] || '?', 'unit ' + u.status, u,
+        d => popup(d.id + ' (' + d.type + ')', [
+          d.status,
+          d.driver ? 'Driver: ' + d.driver.name + ', ' + d.driver.phone : 'Driver: -',
+          'Base: ' + (facilities.get(d.baseId) ? facilities.get(d.baseId).name : (d.baseId || '-'))
+        ]));
+    }
+    prune(unitMarkers, units);
+
+    // trips: a line from the unit to where it is going (the patient, or the hospital while transporting)
+    const tripIds = new Set();
+    for (const t of s.activeTrips) {
+      const unit = units.get(t.unitId);
+      const target = t.status === 'TRANSPORTING' ? facilities.get(t.hospitalId) : cases.get(t.caseId);
+      if (!unit || !target) continue;
+      tripIds.add(t.id);
+      const points = [[unit.latitude, unit.longitude], [target.latitude, target.longitude]];
+      const style = { color: TRIP_COLOUR[t.status] || '#2f6fde', weight: 3, opacity: 0.8,
+                      dashArray: t.role === 'SUPPORT' ? '6 6' : null };
+      let line = tripLines.get(t.id);
+      if (!line) {
+        line = L.polyline(points, style).addTo(map);
+        tripLines.set(t.id, line);
+      } else {
+        line.setLatLngs(points);
+        line.setStyle(style);
+      }
+    }
+    prune(tripLines, tripIds);
+
+    // the side panel
+    const count = (list, test) => list.filter(test).length;
+    setText('units-available', count(s.units, u => u.status === 'AVAILABLE'));
+    setText('units-busy', count(s.units, u => u.status === 'ASSIGNED'));
+    setText('cases-open', s.openCases.length);
+    setText('cases-critical', count(s.openCases, c => c.band === 'CRITICAL'));
+    setText('trips-active', s.activeTrips.length);
+    setText('trips-transporting', count(s.activeTrips, t => t.status === 'TRANSPORTING'));
+    renderHospitals(s.facilities.filter(f => f.kind === 'HOSPITAL'), inbound);
+    document.getElementById('connection').textContent = 'live, ' + new Date(s.at).toLocaleTimeString();
+
+    if (!fitted && s.facilities.length) {                     // zoom to the city once
+      // re-measure first: if the page was laid out while hidden or tiny, Leaflet would think the map has almost no
+      // size and zoom in to a single street; maxZoom keeps it at city level whatever happens
+      map.invalidateSize();
+      map.fitBounds(L.latLngBounds(s.facilities.map(f => [f.latitude, f.longitude])),
+        { padding: [40, 40], maxZoom: 13 });
+      fitted = true;
+    }
+  }
+
+  let hospitalsShown = '';
+
+  // rebuilds the list only when something in it changed: rebuilding every second would swallow clicks
+  function renderHospitals(hospitals, inbound) {
+    const key = JSON.stringify(hospitals.map(h => [h.id, h.name, h.accepting, h.capabilities, inbound.get(h.id) || 0]));
+    if (key === hospitalsShown) return;
+    hospitalsShown = key;
+    const list = document.getElementById('hospitals');
+    list.replaceChildren();
+    for (const h of hospitals) {
+      const row = node('div', 'hospital-row');
+      const left = node('div');
+      left.appendChild(node('div', null, h.name));
+      const coming = inbound.get(h.id) || 0;
+      left.appendChild(node('small', null,
+        (h.capabilities.length ? h.capabilities.join(', ') : 'emergency only') + ' · ' + coming + ' on the way'));
+      row.appendChild(left);
+      row.appendChild(node('span', 'tag ' + (h.accepting ? 'open' : 'diverting'), h.accepting ? 'open' : 'diversion'));
+      row.addEventListener('click', () => {
+        map.setView([h.latitude, h.longitude], 15);
+        facilityMarkers.get(h.id).openPopup();
+      });
+      list.appendChild(row);
+    }
+  }
+
+  function setText(id, value) {
+    document.getElementById(id).textContent = value;
+  }
+
+  // ---- the live feed: one full picture every second; the browser reconnects by itself ----
+  const feed = new EventSource('/api/live');
+  const connection = document.getElementById('connection');
+  feed.addEventListener('snapshot', e => {
+    connection.className = 'live';
+    render(JSON.parse(e.data));
+  });
+  feed.onerror = () => {
+    connection.className = 'down';
+    connection.textContent = 'reconnecting…';
+  };
+</script>
+</body>
+</html>

@@ -42,7 +42,8 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (893 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 173 in dispatch-service)
+## Built so far (929 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
+35 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -701,7 +702,76 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1 and S2 are done (see "Simulator over HTTP"). Next: M1 = a live map page in the browser on OpenStreetMap, served
-by the service and reading /api/live: hospitals and clinics, patients with open cases coloured by band, units
-moving, trips; then SEC.
+S1, S2 and M1 are done. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+(map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
+console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
+only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
+Clarified with the user: the backend service is the REAL application's core; the simulator, the JavaFX window and
+map.html are dev/demo tools; the real front end (React control room, crew PWA, hospital panel, patient app) is
+still to be built.
+
+## Routing (R1 DONE; R2 next), module dispatch-routing, package com.medidispatch.routing
+Why: everything moves and is measured in straight lines today (units fly over lakes; dispatch picks the nearest as
+the crow flies; ETA = straight line at 40 km/h). Decided: write our own graph and algorithms (not OSRM/GraphHopper)
+for the learning and portfolio value; traffic = a MODEL (road-class speeds, rush-hour factors, simulated incidents,
+siren factor), live traffic is paid data. Pieces: R1 road data + graph, R2 Dijkstra then A* on travel time, R3
+traffic model, R4 a TravelTime port in core (straight line stays the default) used by dispatch ranking (ring search
+finds candidates, then rank the closest few by drive time), hospital choice and ETA, R5 simulator drives along
+routes and the map draws them.
+- Module dispatch-routing (the user created it; the folder was first misspelled "disptach-routing", renamed by
+  Claude: folder moved, root pom fixed, IntelliJ needed Reload All Maven Projects). Depends on dispatch-core
+  (Location) and Jackson 3.1.5.
+- RoadClass: MOTORWAY 80, TRUNK 60, PRIMARY 45, SECONDARY 35, TERTIARY 30, UNCLASSIFIED 25, RESIDENTIAL 20,
+  LIVING_STREET 10 km/h (free-flow); fromHighwayTag(tag) (_link = parent class; footway/cycleway/service ->
+  empty).
+- RoadGraph: CSR arrays (latitude[], longitude[], firstEdge[n+1], edgeTarget[], edgeLength[] float metres,
+  edgeClass[] byte = enum position); package-private constructor checks the arrays fit; loop
+  for (e = firstEdge(n); e < edgeEnd(n); e++). Directed: two-way road = 2 edges.
+- GraphBuilder: addNode(osmId, lat, lon) maps OSM ids to 0..n-1 (same id again keeps the first), addRoad(from,
+  to, class, forward, backward) measures metres with Location.distanceKmTo, skips self-loops; arrays double
+  from 1024; build() = counting sort (count, running total, place).
+- OverpassImport.read(InputStream): Jackson STREAMING (JsonParser, JsonToken.PROPERTY_NAME "elements", readTree one
+  element at a time; Jackson 3 needs DeserializationFeature.FAIL_ON_TRAILING_TOKENS disabled for that); nodes go
+  straight in, ways kept and turned into roads at the end (order independent). directions(): oneway yes/true/1
+  forward, -1/reverse backward, no/false/0 both; untagged roundabout/circular and MOTORWAY one-way.
+- GraphCleanup.largestStronglyConnected: Kosaraju (finish order DFS, reversed graph, last-finished first),
+  explicit array stacks (a 200k-node loop test), keeps the largest component, renumbered (via GraphBuilder with old
+  node numbers as ids).
+- NearestNode: grid of CELL_DEGREES 0.0025 (~280 m) stored as CSR; ring search with the exact stop rule (a node in
+  ring k is at least (k-1) x the smaller cell side away); ties to the lower node; points outside are clamped.
+- GraphFile: DataOutputStream binary: MAGIC "MDRG", VERSION 1, class NAMES (mapped by name on load), counts,
+  arrays. Refuses junk, other versions, unknown class names.
+- ImportBangalore main: data/bangalore-roads.json -> cleanup -> data/bangalore.graph (args optional; working
+  directory = project root).
+- The data (downloaded Nov 22 with the user's OK, from https://overpass-api.de/api/interpreter, the query in the R1
+  plan, bbox 12.83,77.48,13.10,77.78; the server was at capacity first, a retry 30 s later worked): 63.5 MB JSON,
+  OSM as of 2026-11-22. Result: read 407,584 nodes / 862,642 edges, kept 402,843 / 855,218 (98.8%), graph file
+  15.8 MB, under 2 s. data/ is in .gitignore. Map data (c) OpenStreetMap contributors, ODbL.
+- Running ImportBangalore outside IntelliJ: maven-dependency-plugin is not in the offline cache; the classpath is
+  dispatch-routing/target/classes;dispatch-core/target/classes; jackson-databind 3.1.5, jackson-core 3.1.5,
+  com.fasterxml.jackson.core:jackson-annotations 2.21 jars; java -Xmx2g.
+- Tests (35): RoadClassTest 4, GraphBuilderTest 8, OverpassImportTest 7, GraphCleanupTest 5 (incl. one-way dead
+  end, 200k loop), NearestNodeTest 6 (incl. closer node in the next ring, 1,000 random points vs brute force),
+  GraphFileTest 5.
+- R2 next (L): Dijkstra on travel time (length / class speed), then A* (straight-line distance / top speed as the
+  heuristic, so it never overestimates); tests on hand-made graphs, then Koramangala -> Jayanagar on the real graph
+  comparing nodes explored and time.
+
+## Live map (M1, DONE)
+- dispatch-service/src/main/resources/static/map.html: served by Spring Boot from static/ (no controller), open
+  http://localhost:8080/map.html. One self-contained page: Leaflet 1.9.4 from unpkg with SRI integrity hashes
+  (decided: Leaflet for this viewer; MapLibre stays planned for the React control room), OpenStreetMap raster tiles
+  with the required credit (ponytail: public tile servers are for dev/demo only).
+- EventSource('/api/live'), event "snapshot" (the browser reconnects by itself). Markers are Leaflet divIcons kept in
+  Maps by id and updated in place (setLatLng; the icon is rebuilt only when its look changes; stale ids pruned), so
+  nothing flickers. Hospitals = red "H" (grey on diversion), clinics teal "+", open cases = dots by band (pulse while
+  ALERTED; CSS "scale" property so the centring transform stays), units = ALS/BLS/N/D/C labels coloured by status,
+  trips = polyline unit -> patient, or unit -> hospital while TRANSPORTING (red), dashed for SUPPORT. Popups are
+  built with textContent only (API values are never inserted as HTML). Side panel: connection, counts, hospitals
+  (accepting/diversion, inbound count, click = zoom + popup), legend. Narrow screens stack the panel below.
+- Shows only patients with an OPEN case (decided: the feed carries only those). No login, like the API.
+- Bugs found in the browser check: (1) first fitBounds ran while the pane was tiny -> zoom 19; fixed with
+  map.invalidateSize() + maxZoom 13. (2) the hospital list was rebuilt every second, swallowing clicks; now rebuilt
+  only when its content key changes. Browsers cache the page: Ctrl+F5 after changing it.
+- Test: ApiTest.theLiveMapPageIsServed (200, listens to /api/live, uses OpenStreetMap tiles).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
