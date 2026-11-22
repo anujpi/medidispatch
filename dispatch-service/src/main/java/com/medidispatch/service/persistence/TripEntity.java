@@ -68,6 +68,7 @@ public class TripEntity {
      * @return the domain trip this row stands for, rebuilt with {@link Assignment#restore}
      */
     Assignment toAssignment() {
-        return Assignment.restore(id, caseId, unitId, role, status, assignedAt);
+        // ponytail: no hospital yet; the assignments.hospital_id column arrives with the V2 migration (H3).
+        return Assignment.restore(id, caseId, unitId, role, status, assignedAt, null);
     }
 }

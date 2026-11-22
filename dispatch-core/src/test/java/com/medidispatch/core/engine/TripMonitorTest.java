@@ -252,6 +252,22 @@ public class TripMonitorTest {
         assertEquals(AssignmentStatus.ARRIVED, tripStatus(a));
     }
 
+    /** Breakdown during transport is not handled yet (BACKLOG), so the monitor leaves a transporting trip alone. */
+    @Test
+    void aTransportingTripIsNotChecked() {
+        addUnit("als-1", NEAR);
+        Case c = criticalCase("p1");
+        Assignment a = enRouteTrip(c);
+        assignmentManager.onArrived(tripOf(c.id()));
+        caseManager.onTransporting(c.id());
+        assignmentManager.startTransport(tripOf(c.id()), "h-apollo");
+
+        clock.advance(Duration.ofMinutes(10));                        // silent far past both timeouts
+
+        assertEquals(0, monitor.checkTrips());
+        assertEquals(AssignmentStatus.TRANSPORTING, tripStatus(a));
+    }
+
     @Test
     void theSameTripIsNotHandledTwice() {
         addUnit("als-1", NEAR);

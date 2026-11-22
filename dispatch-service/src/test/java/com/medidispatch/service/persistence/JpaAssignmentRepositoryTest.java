@@ -101,7 +101,7 @@ class JpaAssignmentRepositoryTest {
     /** Every field round-trips, including the kept id, a SUPPORT role and the exact time. */
     @Test
     void everyFieldComesBack() {
-        Assignment a = Assignment.restore("t1", "c1", "nurse", AssignmentRole.SUPPORT, AssignmentStatus.ARRIVED, ASSIGNED_AT);
+        Assignment a = Assignment.restore("t1", "c1", "nurse", AssignmentRole.SUPPORT, AssignmentStatus.ARRIVED, ASSIGNED_AT, null);
         repo.save(a);
 
         Assignment found = repo.findById("t1").orElseThrow();
@@ -303,10 +303,10 @@ class JpaAssignmentRepositoryTest {
     /** New with the database: a fixed order, oldest first, then by id (in memory it was HashMap order). */
     @Test
     void findActiveIsOldestFirstThenById() {
-        Assignment late = Assignment.restore("t-late", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.EN_ROUTE, ASSIGNED_AT.plusSeconds(60));
-        Assignment early = Assignment.restore("t-early", "c2", "u2", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT);
-        Assignment sameTimeB = Assignment.restore("t-b", "c3", "u3", AssignmentRole.PRIMARY, AssignmentStatus.ARRIVED, ASSIGNED_AT.plusSeconds(30));
-        Assignment sameTimeA = Assignment.restore("t-a", "c4", "u4", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT.plusSeconds(30));
+        Assignment late = Assignment.restore("t-late", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.EN_ROUTE, ASSIGNED_AT.plusSeconds(60), null);
+        Assignment early = Assignment.restore("t-early", "c2", "u2", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT, null);
+        Assignment sameTimeB = Assignment.restore("t-b", "c3", "u3", AssignmentRole.PRIMARY, AssignmentStatus.ARRIVED, ASSIGNED_AT.plusSeconds(30), null);
+        Assignment sameTimeA = Assignment.restore("t-a", "c4", "u4", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT.plusSeconds(30), null);
         repo.save(late);
         repo.save(early);
         repo.save(sameTimeB);

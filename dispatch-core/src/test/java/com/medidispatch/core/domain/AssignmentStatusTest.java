@@ -15,7 +15,8 @@ public class AssignmentStatusTest {
     private static final Map<AssignmentStatus, Set<AssignmentStatus>> ALLOWED = Map.of(
             ASSIGNED,  EnumSet.of(EN_ROUTE, CANCELLED, TIMED_OUT, FAILED),
             EN_ROUTE,  EnumSet.of(ARRIVED, CANCELLED, FAILED),
-            ARRIVED,   EnumSet.of(DONE, CANCELLED, FAILED),
+            ARRIVED,   EnumSet.of(TRANSPORTING, DONE, CANCELLED, FAILED),
+            TRANSPORTING, EnumSet.of(DONE),
             DONE,      EnumSet.noneOf(AssignmentStatus.class),
             CANCELLED, EnumSet.noneOf(AssignmentStatus.class),
             TIMED_OUT, EnumSet.noneOf(AssignmentStatus.class),
@@ -101,5 +102,17 @@ public class AssignmentStatusTest {
         assertFalse(ASSIGNED.isTerminal());
         assertFalse(EN_ROUTE.isTerminal());
         assertFalse(ARRIVED.isTerminal());
+        assertFalse(TRANSPORTING.isTerminal());
+    }
+
+    /** Only an arrived crew can set off for hospital, and a transport can only finish. */
+    @Test
+    void transportStartsFromArrivedAndOnlyEndsAsDone() {
+        assertTrue(ARRIVED.canTransitionTo(TRANSPORTING));
+        assertFalse(ASSIGNED.canTransitionTo(TRANSPORTING));
+        assertFalse(EN_ROUTE.canTransitionTo(TRANSPORTING));
+        assertTrue(TRANSPORTING.canTransitionTo(DONE));
+        assertFalse(TRANSPORTING.canTransitionTo(CANCELLED));
+        assertFalse(TRANSPORTING.canTransitionTo(FAILED));
     }
 }

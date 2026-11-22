@@ -180,10 +180,10 @@ Early development. The pure-Java core is being built bottom-up, each piece with 
 | Area | Components |
 |---|---|
 | Vitals and scoring | `VitalsReading` (validated), `RiskBand`, `RiskAssessment`, `RiskScorer`, a placeholder `SimpleScorer` |
-| Cases | `Case` and `CaseStatus` state machine |
+| Cases | `Case` and `CaseStatus` state machine (including `TRANSPORTING`, on the way to hospital) |
 | Resources | `Resource` (also remembers when a unit last reported and when it last really moved, ignoring 20 m of GPS jitter, and optionally the hospital or clinic it belongs to), `ResourceStatus` state machine, `ResourceType`, `Location` (haversine distance) |
-| Hospitals and clinics | `Facility` (a hospital or a clinic: location, specialist services such as a stroke unit, and whether its emergency department is accepting patients; a clinic has no emergency department, so it can never claim services or receive patients), `FacilityKind`, `Capability`, `DestinationChooser` (the nearest hospital that can treat the patient and is accepting; then one that can treat even if it is full; then the nearest open emergency department; never a clinic) |
-| Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `DONE`, `CANCELLED`, `TIMED_OUT`, `FAILED`), so the record says why a trip ended; `AssignmentRole` (`PRIMARY` ambulance or `SUPPORT` first responder) |
+| Hospitals and clinics | `Facility` (a hospital or a clinic: location, specialist services such as a stroke unit, and whether its emergency department is accepting patients; a clinic has no emergency department, so it can never claim services or receive patients), `FacilityKind`, `Capability`, `DestinationChooser` (the nearest hospital that can treat the patient and is accepting; then one that can treat even if it is full; then the nearest open emergency department; never a clinic), `TransportCoordinator` (the crew on scene takes the patient to hospital: checks it is the main ambulance, chooses the hospital from where the unit is, and moves the trip and the case together, or changes nothing) |
+| Assignments | `Assignment` entity and `AssignmentStatus` state machine (`ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `TRANSPORTING` with the hospital it goes to, `DONE`, `CANCELLED`, `TIMED_OUT`, `FAILED`), so the record says why a trip ended; `AssignmentRole` (`PRIMARY` ambulance or `SUPPORT` first responder) |
 | People | `Patient` |
 | Ports and in-memory adapters | `CaseQueue`, `ResourceRepository`, `ResourceClaimer` (with a concurrency test), `PatientRepository`, `CaseRepository`, `AssignmentRepository`, `VitalsRepository` (reading history), `FacilityRepository`, `EventPublisher` |
 | Events | `CaseStatusChanged`, `CaseBandChanged`, `UnitAssigned`, `AssignmentStatusChanged` (immutable records, published after the state is saved, silent when nothing changed) |
@@ -259,7 +259,9 @@ Cases, the dispatch queue and vitals have their database adapters too, so every 
 
 **Hospitals and clinics** have started, in the engine: a registry of facilities and the choice of where a patient goes. A stroke patient goes to the nearest hospital with a stroke unit, even if a hospital without one is closer; a hospital that is full (on diversion) is skipped while another suitable one is accepting. Clinics are registered next to hospitals because units are based there, but a patient is never taken to one. Each unit can belong to a hospital or clinic. Hospitals will be added by the operator, not sign up themselves, so a fake hospital can never receive patients; each hospital then manages its own diversion status and its own ambulances, doctors and nurses, and sees the patients coming in.
 
-Next: the trip's second leg (scene to hospital) and the hospital endpoints, then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+The trip's second leg works in the engine too. When the crew decides the patient needs hospital care, they say what is needed (for example a stroke unit) and the engine picks the hospital from where the ambulance is and records it on the trip; the ambulance stays busy until the handover, and is then free again as after any trip. Only the main ambulance can carry a patient, never a nurse or a first responder, and while the patient is on board the ambulance can never be taken for another case.
+
+Next: the hospital endpoints and the database for all of this, then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 

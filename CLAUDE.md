@@ -42,11 +42,12 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (768 tests: 558 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
+## Built so far (801 tests: 591 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
 Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
-AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
+AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, TRANSPORTING, DONE, CANCELLED,
+TIMED_OUT, FAILED). CaseStatus has TRANSPORTING too (see "Hospitals").
 Ports + in-memory adapters: CaseQueue, ResourceRepository, ResourceClaimer, PatientRepository, CaseRepository,
 AssignmentRepository (findById, findActiveByCaseId -> List, findActiveByResourceId -> Optional, findActive()),
 VitalsRepository (save, latestFor(patientId) = newest by timeStamp), EventPublisher.
@@ -497,7 +498,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
   same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
-## Hospitals (H1 + H1b written, core only; H2, H3 to do)
+## Hospitals (H1, H1b, H2 written, core only; H3 to do)
 - Capability enum: CARDIAC, STROKE, TRAUMA, PAEDIATRIC. FacilityKind: HOSPITAL, CLINIC.
 - Facility record (id, name, location, kind, capabilities, accepting) replaced H1's Hospital: one record with a kind,
   because hospitals and clinics differ only in canTreat. Compact constructor: blank id/name, null location/kind/
@@ -513,11 +514,29 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
 - Resource.baseId: Optional<String>; 3-arg constructor = no base (delegates to the 4-arg one); blank -> IAE;
   restore(id, type, baseId, status, ...) (baseId is the 3rd parameter). Refer by id like trips do; existence is
   checked at registration (H3) and by a foreign key. JdbcResourceRepository passes null until V2 adds units.base_id.
-- Agreed design for the rest: one trip with a second leg: trip ARRIVED -> TRANSPORTING -> DONE (or ARRIVED -> DONE);
-  case RESPONDING -> TRANSPORTING -> STABILISED -> CLOSED (TRANSPORTING makes upgrader, preemptor and monitors skip).
-  The crew names the needed capabilities when transport starts. ETA = straight line at 40 km/h (ponytail).
-  H2 = core transport leg (L). H3 = V2 migration (facilities table, assignments.hospital_id, units.base_id, CHECKs for
-  TRANSPORTING), JdbcFacilityRepository, DispatchService methods, REST, pre-alert read model (mostly F).
+- H2, the transport leg (one trip, second leg): trip ARRIVED -> TRANSPORTING -> DONE only (or ARRIVED -> DONE on
+  scene); case RESPONDING -> TRANSPORTING -> STABILISED only, then CLOSED. TRANSPORTING is active (not terminal).
+  Upgrader (RESPONDING only), Preemptor (ASSIGNED/EN_ROUTE only), TripMonitor (EN_ROUTE only) and TimeoutMonitor
+  (ASSIGNED only) skip it with no code change; CaseManager.handle only updates the band (default branch). Cancel and
+  fail on a TRANSPORTING trip are refused (breakdown during transport: BACKLOG).
+- Assignment.hospitalId (Optional getter). startTransport(hospitalId) is the ONLY way into TRANSPORTING: blank -> IAE;
+  not PRIMARY or not ARRIVED -> ISE; transitionTo(TRANSPORTING) -> ISE "use startTransport". demoteToSupport refuses
+  a TRANSPORTING trip. restore(id, caseId, resourceId, role, status, assignedAt, hospitalId): blank hospital -> IAE,
+  TRANSPORTING without one -> IAE. The hospital stays after DONE (history). TripEntity passes null until V2.
+- ResourceType.canCarryPatient(): AMBULANCE_ALS/BLS only (a nurse asking for an ambulance: BACKLOG).
+- AssignmentManager.startTransport(tripId, hospitalId): save + AssignmentStatusChanged(ARRIVED -> TRANSPORTING);
+  unit stays ASSIGNED and claimed; complete() from TRANSPORTING frees it as usual. Private find() helper shared by
+  move/demoteToSupport/startTransport. CaseManager.onTransporting(caseId).
+- engine/TransportCoordinator(assignments, resources, chooser, assignmentManager, caseManager).start(tripId, needed):
+  checks PRIMARY, ARRIVED, unit.type().canCarryPatient(), chooses from the UNIT's current position (empty -> ISE "No
+  hospital is registered"), then moves the CASE FIRST (the only step that can still fail) and then the trip, so any
+  refusal changes nothing. No new event (decided): listeners read the hospital from the trip. Finishing = the usual
+  complete -> onStabilised -> close (service completeTrip, LiveEngine, Simulation all work unchanged).
+- H3 = V2 migration (facilities table; assignments.hospital_id; units.base_id; CHECKs on cases.status and
+  assignments.status gain TRANSPORTING; one_active_trip_per_unit must include TRANSPORTING), JdbcFacilityRepository,
+  TripEntity hospital column, DispatchService methods (startTransport repeat-safe: already TRANSPORTING -> return
+  as is), REST, pre-alert read model (ETA = straight line at 40 km/h from the unit's live position, ponytail).
+  Mostly F. Until V2, a TRANSPORTING row cannot be stored, but nothing in the service calls start() yet.
 - Registration (decided Nov 22): the OPERATOR adds facilities (POST /facilities; the simulator plays the operator);
   self sign-up is skipped (trust: a fake hospital must never get patients). Each hospital manages its own:
   PUT /facilities/{id}/accepting, POST /units with baseId (base must exist), GET /facilities/{id}/units (its fleet),
@@ -526,6 +545,6 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
 
 ## Next steps
 Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-hospitals H2 (core transport leg, L; add a BACKLOG entry for breakdown during transport), then H3 (F). Then the
+hospitals H3 (V2 migration, adapters, endpoints, pre-alert; F). Then the
 simulator drives the service over HTTP and registers hospitals and clinics; units start at and return to their base (F).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

@@ -11,5 +11,12 @@ package com.medidispatch.core.domain;
  * </ul>
  */
 public enum ResourceType {
-    AMBULANCE_ALS,AMBULANCE_BLS,NURSE,COURIER,DOCTOR
+    AMBULANCE_ALS,AMBULANCE_BLS,NURSE,COURIER,DOCTOR;
+
+    /**
+     * @return {@code true} for the two ambulance types: only an ambulance can take a patient to hospital
+     */
+    public boolean canCarryPatient() {
+        return this == AMBULANCE_ALS || this == AMBULANCE_BLS;
+    }
 }

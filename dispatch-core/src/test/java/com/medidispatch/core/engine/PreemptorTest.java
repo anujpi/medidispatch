@@ -190,6 +190,25 @@ public class PreemptorTest {
         assertEquals(ResourceStatus.ASSIGNED, unitStatus("als-1"));
     }
 
+    /** A crew carrying a patient to hospital is never taken either. */
+    @Test
+    void aUnitTransportingAPatientIsNeverTaken() {
+        addUnit("als-1", ResourceType.AMBULANCE_ALS, NEAR);
+        Case a = openCase("pa", RiskBand.HIGH);
+        Assignment tripA = dispatchAndAssign();
+        assignmentManager.onEnRoute(tripOf(a.id()));
+        assignmentManager.onArrived(tripOf(a.id()));
+        caseManager.onTransporting(a.id());
+        assignmentManager.startTransport(tripOf(a.id()), "h-apollo");
+        Case b = openCase("pb", RiskBand.CRITICAL);
+
+        assertFalse(preemptor.makeRoomFor(b));
+
+        assertEquals(AssignmentStatus.TRANSPORTING, tripStatus(tripA));
+        assertEquals(CaseStatus.TRANSPORTING, reload(a).status());
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("als-1"));
+    }
+
     @Test
     void aUnitOfTheWrongTypeForTheWaitingCaseIsLeftAlone() {
         addUnit("bls-1", ResourceType.AMBULANCE_BLS, NEAR);             // fine for HIGH, not for CRITICAL

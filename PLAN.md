@@ -21,8 +21,8 @@ and warns it before the patient arrives.
 | `dispatch-core` | pure-Java engine: scoring placeholder, cases, response ladder, ring search, claim, preemption, first responders, response upgrade, timeouts, trip monitoring, recovery, back in service |
 | `dispatch-sim` | seeded 2-hour simulation + endless threaded live city (`LiveSimulation`) |
 | `dispatch-sim-fx` | JavaFX window: live map, panel, report |
-| tests | 768 (558 core, 63 sim, 22 fx, 125 service) |
-| `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); on Postgres + PostGIS + TimescaleDB (JDBC adapters, JPA for trips, one transaction per call inside the lock, survives a restart). Hospitals in progress: facility registry (hospitals + clinics) and destination choice done in core |
+| tests | 801 (591 core, 63 sim, 22 fx, 125 service) |
+| `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); on Postgres + PostGIS + TimescaleDB (JDBC adapters, JPA for trips, one transaction per call inside the lock, survives a restart). Hospitals in progress: facility registry (hospitals + clinics), destination choice and the transport leg done in core |
 
 ---
 
@@ -191,7 +191,7 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
 - [ ] hospitals: domain, registry, destination choice, second trip leg, pre-alert data (L)
   - [x] H1: capabilities, registry, destination choice (4 rules)
   - [x] H1b: facilities = hospitals + clinics; units belong to a base
-  - [ ] H2: trip second leg scene → hospital (core)
+  - [x] H2: trip second leg scene → hospital (core)
   - [ ] H3: V2 migration, facility adapter, endpoints (operator adds facilities; hospital sets diversion, adds its
         units, sees its fleet and inbound pre-alerts)
 - [ ] the simulator drives the service over HTTP (F)

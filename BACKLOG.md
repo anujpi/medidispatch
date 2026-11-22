@@ -52,6 +52,14 @@ Ordered roughly by priority inside each group.
 
 ## Hospitals
 
+- [ ] **Breakdown during transport.** A TRANSPORTING trip can only end as DONE: the trip monitor skips it and
+      cancel/fail are refused. A real breakdown with the patient on board needs its own flow: send a second
+      ambulance to where the broken one is (not the patient's home), move the patient over, then fail the first
+      trip and take that unit offline.
+- [ ] **A nurse asks for transport.** Only ambulances carry patients, so a nurse or doctor who finds the patient
+      needs hospital care cannot start a transport. Add "request an ambulance" from the scene: requeue the case
+      with an ambulance-only plan, with the nurse staying on as a first responder.
+
 - [ ] **Hospital access control.** The hospital endpoints (diversion, adding units, fleet, inbound patients) will
       have no login at first, so any caller can act for any hospital. With roles (Spring Security, week 3), a
       hospital user may only touch its own facility, and only the operator may add facilities.

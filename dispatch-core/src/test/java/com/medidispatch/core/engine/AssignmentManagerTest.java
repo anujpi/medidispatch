@@ -560,4 +560,68 @@ public class AssignmentManagerTest {
         assertThrows(IllegalStateException.class, () -> manager.demoteToSupport(nurse.id()));
         assertTrue(events.published().isEmpty());
     }
+
+    // ---------- transport: scene to hospital ----------
+
+    // dispatched, then en route and arrived, events cleared
+    private Assignment arrivedOnScene(String caseId, String resourceId) {
+        Assignment a = dispatched(caseId, resourceId);
+        manager.onEnRoute(a.id());
+        manager.onArrived(a.id());
+        events.clear();
+        return a;
+    }
+
+    @Test
+    void startTransportSavesTheHospitalAnnouncesItAndKeepsTheUnitBusy() {
+        Assignment a = arrivedOnScene("case-1", "r1");
+
+        Assignment moving = manager.startTransport(a.id(), "h-apollo");
+
+        assertEquals(AssignmentStatus.TRANSPORTING, moving.status());
+        assertEquals(AssignmentStatus.TRANSPORTING, tripStatus(a));
+        assertEquals("h-apollo", assignments.findById(a.id()).get().hospitalId().orElseThrow());
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
+        assertEquals("case-1", claimer.claimedBy("r1").get());
+        assertEquals(List.of(new AssignmentStatusChanged(a.id(), "case-1", "r1",
+                AssignmentStatus.ARRIVED, AssignmentStatus.TRANSPORTING, NOW)), events.published());
+    }
+
+    @Test
+    void completingATransportFreesTheUnit() {
+        Assignment a = arrivedOnScene("case-1", "r1");
+        manager.startTransport(a.id(), "h-apollo");
+
+        manager.complete(a.id());
+
+        assertEquals(AssignmentStatus.DONE, tripStatus(a));
+        assertUnitIsFree("r1");
+    }
+
+    /** Breakdown during transport is not handled yet (BACKLOG): failing or cancelling is refused. */
+    @Test
+    void aTransportCannotBeCancelledOrFailed() {
+        Assignment a = arrivedOnScene("case-1", "r1");
+        manager.startTransport(a.id(), "h-apollo");
+        events.clear();
+
+        assertThrows(IllegalStateException.class, () -> manager.cancel(a.id()));
+        assertThrows(IllegalStateException.class, () -> manager.onFailed(a.id()));
+
+        assertEquals(AssignmentStatus.TRANSPORTING, tripStatus(a));
+        assertEquals(ResourceStatus.ASSIGNED, unitStatus("r1"));
+        assertTrue(events.published().isEmpty());
+    }
+
+    @Test
+    void startTransportIsRefusedBeforeArrivalAndForUnknownTrips() {
+        Assignment a = dispatched("case-1", "r1");
+
+        assertThrows(IllegalStateException.class, () -> manager.startTransport(a.id(), "h-apollo"));
+        assertThrows(IllegalStateException.class, () -> manager.startTransport("no-such-trip", "h-apollo"));
+        assertThrows(IllegalArgumentException.class, () -> manager.startTransport(" ", "h-apollo"));
+
+        assertEquals(AssignmentStatus.ASSIGNED, tripStatus(a));
+        assertTrue(events.published().isEmpty());
+    }
 }

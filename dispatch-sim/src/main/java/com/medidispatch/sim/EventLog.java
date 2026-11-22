@@ -81,6 +81,7 @@ final class EventLog {
             String where = patientOf(e.caseId());
             return switch (e.to()) {
                 case ARRIVED -> e.resourceId() + " arrived at " + where;
+                case TRANSPORTING -> e.resourceId() + " taking " + where + " to hospital";
                 case DONE -> e.resourceId() + " finished at " + where;
                 case CANCELLED -> e.resourceId() + " called off (" + where + ")";
                 case TIMED_OUT -> e.resourceId() + " never answered (" + where + ")";

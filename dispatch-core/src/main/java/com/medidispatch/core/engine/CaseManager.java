@@ -121,7 +121,20 @@ public class CaseManager {
     }
 
     /**
-     * The patient was stabilised on scene: RESPONDING to STABILISED.
+     * The patient is being taken to a hospital: RESPONDING to TRANSPORTING. Normally called through
+     * {@link TransportCoordinator#start}. While TRANSPORTING, new readings only update the band: the case is not
+     * requeued, upgraded or preempted.
+     *
+     * @param caseId the case
+     * @throws IllegalStateException if there is no such case or it is not RESPONDING
+     */
+    public void onTransporting(String caseId) {
+        move(caseId, CaseStatus.TRANSPORTING);
+    }
+
+    /**
+     * The patient was stabilised: on scene (RESPONDING to STABILISED) or handed over at the hospital (TRANSPORTING
+     * to STABILISED).
      *
      * @param caseId the case
      * @throws IllegalStateException if the case does not exist or the move is not allowed

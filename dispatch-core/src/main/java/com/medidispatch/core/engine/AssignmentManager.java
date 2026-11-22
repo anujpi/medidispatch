@@ -89,7 +89,30 @@ public class AssignmentManager {
     }
 
     /**
-     * The job is finished: ARRIVED to DONE. The unit becomes available again.
+     * The crew sets off with the patient for {@code hospitalId}: ARRIVED to TRANSPORTING. The unit stays ASSIGNED and
+     * keeps its claim until the trip is completed. Normally called through {@link TransportCoordinator#start}, which
+     * chooses the hospital and moves the case too.
+     *
+     * @param assignmentId the trip that moves
+     * @param hospitalId   the hospital the patient is taken to
+     * @return the updated trip
+     * @throws IllegalArgumentException if an argument is blank
+     * @throws IllegalStateException    if there is no such trip, it is not the main (PRIMARY) trip, or it is not
+     *                                  ARRIVED
+     */
+    public Assignment startTransport(String assignmentId, String hospitalId) {
+        Assignment a = find(assignmentId);
+        AssignmentStatus from = a.status();
+        a.startTransport(hospitalId);                        // refuses before anything changes
+        assignments.save(a);
+        publisher.publish(new AssignmentStatusChanged(
+                a.id(), a.caseId(), a.resourceId(), from, a.status(), clock.instant()));
+        return a;
+    }
+
+    /**
+     * The job is finished, on scene or at the hospital: ARRIVED or TRANSPORTING to DONE. The unit becomes available
+     * again.
      *
      * @param assignmentId the trip that ends
      * @return the updated trip
@@ -149,11 +172,7 @@ public class AssignmentManager {
      * @throws IllegalStateException    if there is no such trip, it is not PRIMARY, or it has ended
      */
     public Assignment demoteToSupport(String assignmentId) {
-        if (assignmentId == null || assignmentId.isBlank()) {
-            throw new IllegalArgumentException("assignmentId is required");
-        }
-        Assignment a = assignments.findById(assignmentId)
-                .orElseThrow(() -> new IllegalStateException("No assignment " + assignmentId));
+        Assignment a = find(assignmentId);
         AssignmentRole from = a.role();
         a.demoteToSupport();                                 // refuses before anything changes
         assignments.save(a);
@@ -162,12 +181,16 @@ public class AssignmentManager {
         return a;
     }
 
-    private Assignment move(String assignmentId, AssignmentStatus next) {
+    private Assignment find(String assignmentId) {
         if (assignmentId == null || assignmentId.isBlank()) {
             throw new IllegalArgumentException("assignmentId is required");
         }
-        Assignment a = assignments.findById(assignmentId)
+        return assignments.findById(assignmentId)
                 .orElseThrow(() -> new IllegalStateException("No assignment " + assignmentId));
+    }
+
+    private Assignment move(String assignmentId, AssignmentStatus next) {
+        Assignment a = find(assignmentId);
         AssignmentStatus from = a.status();
         a.transitionTo(next);                                // an illegal move throws here, before anything changes
         assignments.save(a);

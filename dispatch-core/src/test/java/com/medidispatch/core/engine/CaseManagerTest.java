@@ -216,6 +216,60 @@ public class CaseManagerTest {
         assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, null,events, clock));
         assertThrows(IllegalArgumentException.class, () -> new CaseManager(cases, queue, events,null));
     }
+    // ---------- transport ----------
+
+    @Test
+    void onTransportingMovesARespondingCaseAndAnnouncesIt() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        queue.pollNext();
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
+        events.clear();
+
+        manager.onTransporting(c.id());
+
+        assertEquals(CaseStatus.TRANSPORTING, reload(c).status());
+        assertEquals(List.of(new CaseStatusChanged(c.id(), "p1", CaseStatus.RESPONDING, CaseStatus.TRANSPORTING, NOW)),
+                events.published());
+    }
+
+    /** On the way to hospital, a worse reading changes the band only: no requeue, the ambulance is already there. */
+    @Test
+    void aTransportingCaseGetsTheNewBandButStaysOutOfTheQueue() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        queue.pollNext();
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
+        manager.onTransporting(c.id());
+
+        manager.handle(assessment("p1", RiskBand.CRITICAL));
+
+        assertEquals(CaseStatus.TRANSPORTING, reload(c).status());
+        assertEquals(RiskBand.CRITICAL, reload(c).band());
+        assertEquals(0, queue.size());
+    }
+
+    /** Handed over at the hospital: TRANSPORTING, then STABILISED and CLOSED as after treatment on scene. */
+    @Test
+    void aTransportedCaseIsStabilisedAndClosed() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();
+        manager.onAssigned(new Assignment(c.id(), "r1", AssignmentRole.PRIMARY, NOW));
+        manager.onTransporting(c.id());
+
+        manager.onStabilised(c.id());
+        manager.close(c.id());
+
+        assertEquals(CaseStatus.CLOSED, reload(c).status());
+    }
+
+    @Test
+    void onTransportingIsRefusedForACaseThatIsNotResponding() {
+        Case c = manager.handle(assessment("p1", RiskBand.HIGH)).get();       // ALERTED
+
+        assertThrows(IllegalStateException.class, () -> manager.onTransporting(c.id()));
+        assertThrows(IllegalStateException.class, () -> manager.onTransporting("ghost"));
+
+        assertEquals(CaseStatus.ALERTED, reload(c).status());
+    }
+
     // ---------- onStabilised and close ----------
 
     @Test

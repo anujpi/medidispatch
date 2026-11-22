@@ -13,7 +13,8 @@ public class CaseStatusTest {
     private static final Map<CaseStatus, Set<CaseStatus>> ALLOWED = Map.of(
             MONITORING, EnumSet.of(ALERTED, CANCELLED),
             ALERTED,    EnumSet.of(RESPONDING, MONITORING, CANCELLED),
-            RESPONDING, EnumSet.of(STABILISED, ALERTED, CANCELLED),
+            RESPONDING, EnumSet.of(STABILISED, TRANSPORTING, ALERTED, CANCELLED),
+            TRANSPORTING, EnumSet.of(STABILISED),
             STABILISED, EnumSet.of(CLOSED, ALERTED),
             CLOSED,     EnumSet.noneOf(CaseStatus.class),
             CANCELLED,  EnumSet.noneOf(CaseStatus.class)
@@ -73,5 +74,16 @@ public class CaseStatusTest {
         assertFalse(ALERTED.isTerminal());
         assertFalse(RESPONDING.isTerminal());
         assertFalse(STABILISED.isTerminal());
+        assertFalse(TRANSPORTING.isTerminal());
+    }
+
+    /** The transport path: RESPONDING, TRANSPORTING, then handed over (STABILISED); no shortcut to CLOSED. */
+    @Test
+    void transportGoesFromRespondingToStabilised() {
+        assertTrue(RESPONDING.canTransitionTo(TRANSPORTING));
+        assertTrue(TRANSPORTING.canTransitionTo(STABILISED));
+        assertFalse(ALERTED.canTransitionTo(TRANSPORTING));
+        assertFalse(TRANSPORTING.canTransitionTo(CLOSED));
+        assertFalse(TRANSPORTING.canTransitionTo(ALERTED));
     }
 }

@@ -6,6 +6,9 @@ package com.medidispatch.core.domain;
  *   <li>{@code ASSIGNED}: the unit was told to go and has not acknowledged yet.</li>
  *   <li>{@code EN_ROUTE}: the unit is on its way.</li>
  *   <li>{@code ARRIVED}: the crew is with the patient.</li>
+ *   <li>{@code TRANSPORTING}: the crew is taking the patient to a hospital (the trip then has a hospital id). Only
+ *       the main ambulance transports, and only {@code DONE} follows: a breakdown during transport is not handled
+ *       yet.</li>
  *   <li>{@code DONE}: finished normally.</li>
  *   <li>{@code CANCELLED}: called off, for example because the unit was preempted for a worse case.</li>
  *   <li>{@code TIMED_OUT}: the unit never acknowledged.</li>
@@ -14,13 +17,14 @@ package com.medidispatch.core.domain;
  * The last four are terminal. Keeping them separate records <em>why</em> a trip ended.
  */
 public enum AssignmentStatus {
-    ASSIGNED,EN_ROUTE,ARRIVED,DONE,CANCELLED,TIMED_OUT,FAILED;
+    ASSIGNED,EN_ROUTE,ARRIVED,TRANSPORTING,DONE,CANCELLED,TIMED_OUT,FAILED;
 
     /**
      * Says whether this status may move to {@code next}.
      * <p>
      * Only a trip that is still {@code ASSIGNED} can time out. A trip can be cancelled or fail at any
-     * stage before it ends. Terminal statuses never move.
+     * stage before it ends, except during transport: TRANSPORTING only moves to DONE. Terminal statuses never
+     * move.
      *
      * @param next the status to move to
      * @return {@code true} if the move is allowed
@@ -29,7 +33,8 @@ public enum AssignmentStatus {
         return switch(this){
             case ASSIGNED -> next == EN_ROUTE || next == CANCELLED || next == TIMED_OUT || next == FAILED;
             case EN_ROUTE -> next == ARRIVED || next == CANCELLED || next == FAILED;
-            case ARRIVED -> next == DONE || next == CANCELLED || next == FAILED;
+            case ARRIVED -> next == TRANSPORTING || next == DONE || next == CANCELLED || next == FAILED;
+            case TRANSPORTING -> next == DONE;
             case DONE, CANCELLED,TIMED_OUT, FAILED -> false;
         };
     }
