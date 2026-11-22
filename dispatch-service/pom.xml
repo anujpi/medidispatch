@@ -43,10 +43,41 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
+        <!-- JdbcClient, for the database adapters. The plain library, not the Boot starter: the starter would make
+             Boot create a DataSource at startup, and the app does not use the database until EngineConfig switches -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
         <!-- JUnit, AssertJ, Mockito and MockMvc, for tests only -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Database, for tests only until the adapters arrive (then Flyway and the driver move to the main scope). -->
+        <!-- Flyway: runs the numbered SQL files in src/main/resources/db/migration, each exactly once, in order -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Flyway's PostgreSQL support (a separate jar since Flyway 10) -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- the JDBC driver: how Java talks to Postgres -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- starts a throwaway Postgres in Docker for a test, and removes it afterwards -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

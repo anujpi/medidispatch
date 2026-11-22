@@ -3,6 +3,7 @@ package com.medidispatch.core.domain;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -232,4 +233,67 @@ public class ResourceTest {
         assertEquals(BANGALORE, r.location());
     }
 
+    // ---- restore: rebuilding a stored unit (used by storage adapters) ----
+
+    /** restore brings back every field, including the movement reference point and both times. */
+    @Test
+    void restoreRebuildsEveryField() {
+        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.OFFLINE, CHENNAI, BANGALORE,
+                T0, T0.minusSeconds(60));
+
+        assertEquals("u1", r.id());
+        assertEquals(ResourceType.NURSE, r.type());
+        assertEquals(ResourceStatus.OFFLINE, r.status());
+        assertEquals(CHENNAI, r.location());
+        assertEquals(BANGALORE, r.movedFrom());
+        assertEquals(Optional.of(T0), r.lastSeenAt());
+        assertEquals(Optional.of(T0.minusSeconds(60)), r.lastMovedAt());
+    }
+
+    /** null times mean "never", exactly like a new unit. */
+    @Test
+    void restoreKeepsNeverAsEmpty() {
+        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, HERE, null, null);
+
+        assertTrue(r.lastSeenAt().isEmpty());
+        assertTrue(r.lastMovedAt().isEmpty());
+    }
+
+    /**
+     * Movement is measured from the restored reference point, not from the current position: STEP is only 11 m
+     * from where the unit is (JITTER) but 22 m from where it last counted as moving (HERE), so it counts.
+     */
+    @Test
+    void aRestoredUnitMeasuresMovementFromItsSavedReferencePoint() {
+        Resource r = Resource.restore("u1", ResourceType.AMBULANCE_ALS, ResourceStatus.ASSIGNED, JITTER, HERE, T0, T0);
+
+        r.reportLocation(STEP, T0.plusSeconds(10));
+
+        assertEquals(Optional.of(T0.plusSeconds(10)), r.lastMovedAt());
+        assertEquals(STEP, r.movedFrom());
+    }
+
+    /** A restored unit still obeys its rules: OFFLINE cannot go straight to ASSIGNED. */
+    @Test
+    void aRestoredUnitStillObeysTheRules() {
+        Resource r = Resource.restore("u1", ResourceType.NURSE, ResourceStatus.OFFLINE, HERE, HERE, null, null);
+
+        assertThrows(IllegalStateException.class, () -> r.transitionTo(ResourceStatus.ASSIGNED));
+        assertEquals(ResourceStatus.OFFLINE, r.status());
+    }
+
+    /** restore checks its arguments like the constructor, plus status and movedFrom. */
+    @Test
+    void restoreRejectsMissingValues() {
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore("u1", ResourceType.NURSE, null, HERE, HERE, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, null, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore(" ", ResourceType.NURSE, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore("u1", null, ResourceStatus.AVAILABLE, HERE, HERE, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> Resource.restore("u1", ResourceType.NURSE, ResourceStatus.AVAILABLE, null, HERE, null, null));
+    }
 }

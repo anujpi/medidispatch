@@ -173,4 +173,38 @@ public class CaseTest {
 
         assertThrows(IllegalStateException.class, () -> c.updateBand(RiskBand.LOW));
     }
+
+    // ---- restore: rebuilding a stored case (used by storage adapters) ----
+
+    /** restore brings back every field, including a status the constructor could never start in. */
+    @Test
+    void restoreRebuildsEveryField() {
+        Case c = Case.restore("c1", "p1", CaseStatus.RESPONDING, RiskBand.CRITICAL, OPENED);
+
+        assertEquals("c1", c.id());
+        assertEquals("p1", c.patientId());
+        assertEquals(CaseStatus.RESPONDING, c.status());
+        assertEquals(RiskBand.CRITICAL, c.band());
+        assertEquals(OPENED, c.openedAt());
+    }
+
+    /** A restored case still obeys its rules: a closed case cannot be reopened and its band cannot change. */
+    @Test
+    void aRestoredCaseStillObeysTheRules() {
+        Case c = Case.restore("c1", "p1", CaseStatus.CLOSED, RiskBand.HIGH, OPENED);
+
+        assertThrows(IllegalStateException.class, () -> c.transitionTo(CaseStatus.ALERTED));
+        assertThrows(IllegalStateException.class, () -> c.updateBand(RiskBand.LOW));
+        assertEquals(CaseStatus.CLOSED, c.status());
+        assertEquals(RiskBand.HIGH, c.band());
+    }
+
+    /** restore checks its arguments like the constructor, plus the status. */
+    @Test
+    void restoreRejectsMissingValues() {
+        assertThrows(IllegalArgumentException.class, () -> Case.restore("c1", "p1", null, RiskBand.HIGH, OPENED));
+        assertThrows(IllegalArgumentException.class, () -> Case.restore(" ", "p1", CaseStatus.ALERTED, RiskBand.HIGH, OPENED));
+        assertThrows(IllegalArgumentException.class, () -> Case.restore("c1", "p1", CaseStatus.ALERTED, null, OPENED));
+        assertThrows(IllegalArgumentException.class, () -> Case.restore("c1", "p1", CaseStatus.ALERTED, RiskBand.HIGH, null));
+    }
 }

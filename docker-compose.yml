@@ -1,0 +1,23 @@
+# Local database for development: one Postgres server with PostGIS (maps) and TimescaleDB (time series).
+#   start:          docker compose up -d
+#   stop:           docker compose down      (keeps the data)
+#   stop and wipe:  docker compose down -v   (deletes the dbdata volume too)
+services:
+  db:
+    # The "ha" image ships Postgres + PostGIS + TimescaleDB together.
+    image: timescale/timescaledb-ha:pg17
+    environment:
+      POSTGRES_DB: medidispatch
+      POSTGRES_USER: medidispatch
+      # ponytail: plain-text password, fine for a laptop-only dev database; use secrets in any real deployment.
+      POSTGRES_PASSWORD: medidispatch
+    ports:
+      # laptop port : container port
+      - "5432:5432"
+    volumes:
+      # A named volume survives "docker compose down". This image keeps its data here, NOT in
+      # /var/lib/postgresql/data like the plain postgres image; the wrong path silently loses data.
+      - dbdata:/home/postgres/pgdata/data
+
+volumes:
+  dbdata:

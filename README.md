@@ -246,7 +246,11 @@ The API is built for **weak mobile networks**. When a crew taps Accept in a tunn
 
 **Live feed.** Screens open `GET /api/live`, a Server-Sent Events stream: one HTTP request whose response never ends, so the server can keep writing to it. A new connection gets the whole picture (every unit, every open case with its location, every trip under way) at once, then again every second. Sending the full picture instead of "what changed" makes the feed self-healing: a screen that missed a message on bad Wi-Fi is correct again a second later, and the browser's `EventSource` reconnects by itself. The picture is copied while holding the engine's lock, but sent only after the lock is released, on its own thread: a laptop whose connection freezes can delay its own updates, but never dispatch. Open streams are closed at shutdown so restarts do not hang.
 
-Next: Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**Database.** The schema is ready and tested on a real Postgres with PostGIS and TimescaleDB, started in Docker for the test: Flyway applies it, and the tests check that the database itself enforces the rules. Two cases claiming one ambulance at the same moment: the second waits for the first, then loses, with no Java lock involved. A patient cannot have two open cases, a unit cannot have two active trips, and a reading sent twice is refused. "Units within 5 km" uses a spatial index, and vitals live in a time-series table split into one chunk per day. The service itself still runs in memory; connecting it is the next step.
+
+The first database adapters are done: patients, units (with the nearby search) and claims, each a second implementation of a port the engine already uses, so the engine does not change. Each is tested on the real database. A test loads the same 60 random units into the in-memory and the database version and checks that both find the same units, in the same order, from several places in the city; and 20 threads racing for one ambulance through the database still produce exactly one winner. To read a stored case, unit or trip back, the engine gained one small `restore` method per class, which rebuilds an object as it was saved without letting it skip its rules afterwards.
+
+Next: the remaining adapters (cases, the dispatch queue, vitals and trips), then switching the service over to the database. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -281,7 +285,9 @@ Next: Postgres. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 - [x] Spring Boot service: the engine wired as beans, one front door (`DispatchService`), the scheduled dispatch loop
 - [x] REST API with error mapping and idempotent requests
 - [x] Live feed for screens (server-sent events)
-- [ ] Postgres + PostGIS + TimescaleDB adapters, Flyway, Testcontainers
+- [x] Database schema: Postgres + PostGIS + TimescaleDB, Flyway, tested with Testcontainers
+- [x] Database adapters for patients, units (nearby search) and claims
+- [ ] Database adapters for cases, the queue, vitals and trips (JPA), the service running on Postgres
 - [ ] Hospitals: registry, destination choice, pre-alert
 - [ ] The simulator driving the running service over HTTP
 - [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
@@ -293,7 +299,7 @@ The full plan is in [PLAN.md](PLAN.md).
 
 ## Getting started
 
-**Requirements:** JDK 21 and Maven (or an IDE with Maven support, such as IntelliJ IDEA).
+**Requirements:** JDK 21 and Maven (or an IDE with Maven support, such as IntelliJ IDEA), and Docker Desktop running for the database tests.
 
 ```bash
 git clone <this-repository>
@@ -314,7 +320,7 @@ To watch the live feed, keep this running in a terminal (`-N` prints data as it 
 curl -N localhost:8080/api/live
 ```
 
-It keeps everything in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). The service does not use it yet: it keeps everything in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -356,6 +362,7 @@ Optional<Assignment> assignment = dispatcher.dispatchNext();
 ```
 medidispatch/
   pom.xml                     parent build
+  docker-compose.yml          local database: Postgres + PostGIS + TimescaleDB
   PLAN.md                     detailed project plan
   dispatch-core/              pure-Java engine
     src/main/java/com/medidispatch/core/
@@ -387,6 +394,10 @@ medidispatch/
       api/                    PatientController, UnitController, TripController, request records
                               (PatientRequest, UnitRequest, Coordinates), ApiErrors (exceptions to status codes)
       live/                   LiveFeed (server-sent events: the whole picture every second)
+      persistence/            database adapters: JdbcPatientRepository, JdbcResourceRepository,
+                              JdbcResourceClaimer, DbTime (more to come)
+    src/main/resources/db/migration/
+                              V1__init.sql (the database schema, applied by Flyway)
   BACKLOG.md                  known gaps to tackle later
   (planned)
   web/                        React + TypeScript PWA (control room, crew, patient, hospital)
@@ -409,9 +420,11 @@ Every component is covered by tests, including:
 - window logic kept out of the UI classes so it can be tested: the map projection (north up, corners, scale), pan and zoom, what a click selects, and the themes,
 - service tests: Spring builds every engine part exactly once; a patient goes from first reading to closed case through `DispatchService`; and 50 threads hit the service while the dispatch loop runs, without a unit ever being sent twice,
 - API tests over HTTP (MockMvc): the whole story from registration to closed case, a step out of order is 409 and a repeated step is 200, a resent reading is a duplicate, and every unknown id is 404 and every broken or impossible body is 400,
-- a live-feed test over a real network connection: a real server on a random port and Java's HTTP client reading the stream line by line as it arrives, checking that the first picture comes at once and that a new unit shows up in a later message.
+- a live-feed test over a real network connection: a real server on a random port and Java's HTTP client reading the stream line by line as it arrives, checking that the first picture comes at once and that a new unit shows up in a later message,
+- database schema tests on a real Postgres in Docker (Testcontainers): two connections race to claim one ambulance and the second waits on the row lock, then loses; the database refuses a second open case, a second active trip, an unknown status and a duplicate reading; a unit 2 km away is found within 5 km and one 20 km away is not,
+- database adapter tests on the same real database: every field survives the round trip, saving a unit never undoes its claim, 20 threads race for one ambulance and exactly one wins, and the database search gives the same units in the same order as the in-memory one for a random fleet of 60.
 
-Planned: contract tests that run the same suite against the in-memory and the Postgres adapters (Testcontainers), and simulator-driven load tests.
+Planned: the whole service test suite running on Postgres, and simulator-driven load tests.
 
 ## Safety, privacy and fairness
 

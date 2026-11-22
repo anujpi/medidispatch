@@ -39,6 +39,36 @@ public class Resource {
         this.location = location;
         this.movedFrom= location;
     }
+
+    /**
+     * Rebuilds a unit that already exists (read back from storage), with every field as it was saved.
+     * <p>
+     * For storage adapters only. The constructor always starts a unit as AVAILABLE and never seen, and
+     * {@link #transitionTo(ResourceStatus)} only allows legal moves, so neither can rebuild a stored unit. This
+     * sets the fields directly; from then on the restored unit obeys every rule as usual.
+     *
+     * @param id          unique unit id; never blank
+     * @param type        what kind of unit it is
+     * @param status      its saved status
+     * @param location    where it is
+     * @param movedFrom   the last position that counted as movement ({@link #reportLocation})
+     * @param lastSeenAt  when it last reported; {@code null} if never
+     * @param lastMovedAt when it last really moved; {@code null} if never
+     * @return the rebuilt unit
+     * @throws IllegalArgumentException if the id is blank or a required argument is missing
+     */
+    public static Resource restore(String id, ResourceType type, ResourceStatus status, Location location,
+                                   Location movedFrom, Instant lastSeenAt, Instant lastMovedAt) {
+        if (status == null) throw new IllegalArgumentException("Status must be provided");
+        if (movedFrom == null) throw new IllegalArgumentException("movedFrom must be provided");
+        Resource r = new Resource(id, type, location);
+        r.status = status;
+        r.movedFrom = movedFrom;
+        r.lastSeenAt = lastSeenAt;
+        r.lastMovedAt = lastMovedAt;
+        return r;
+    }
+
     /**
      * Moves the unit to a new status, if the move is allowed.
      *
@@ -105,6 +135,13 @@ public class Resource {
     public ResourceStatus status() { return status; }
     public ResourceType type() { return type; }
     public Location location() { return location; }
+
+    /**
+     * The last position that counted as movement: the next live report is measured from here. Storage adapters
+     * need it so a restarted service keeps spotting stuck units correctly.
+     */
+    public Location movedFrom() { return movedFrom; }
+
     /** When the unit last sent any position report; empty until its first report. */
     public Optional<Instant> lastSeenAt()  { return Optional.ofNullable(lastSeenAt); }
 

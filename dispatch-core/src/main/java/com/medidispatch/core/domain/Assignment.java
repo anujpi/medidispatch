@@ -18,10 +18,10 @@ public class Assignment {
     private final String resourceId;
     private AssignmentRole role;
     private final Instant assignedAt;
-    private AssignmentStatus status = AssignmentStatus.ASSIGNED;
+    private AssignmentStatus status;
 
     /**
-     * Creates a new trip in {@link AssignmentStatus#ASSIGNED}.
+     * Creates a new trip in {@link AssignmentStatus#ASSIGNED}, with a new random id.
      *
      * @param caseId     the case the unit is sent to; never blank
      * @param resourceId the unit that is sent; never blank
@@ -30,6 +30,36 @@ public class Assignment {
      * @throws IllegalArgumentException if an id is blank or any argument is missing
      */
     public Assignment(String caseId, String resourceId, AssignmentRole role, Instant assignedAt) {
+        this(UUID.randomUUID().toString(), caseId, resourceId, role, AssignmentStatus.ASSIGNED, assignedAt);
+    }
+
+    /**
+     * Rebuilds a trip that already exists (read back from storage), with its saved id, role and status.
+     * <p>
+     * For storage adapters only. The public constructor invents a new id and starts in ASSIGNED, and
+     * {@link #transitionTo(AssignmentStatus)} only allows legal moves, so neither can rebuild a stored trip.
+     * From then on the restored trip obeys every rule as usual.
+     *
+     * @param id         the saved trip id; never blank
+     * @param caseId     the case the unit was sent to; never blank
+     * @param resourceId the unit that was sent; never blank
+     * @param role       its saved role
+     * @param status     its saved status
+     * @param assignedAt when the unit was assigned
+     * @return the rebuilt trip
+     * @throws IllegalArgumentException if an id is blank or any argument is missing
+     */
+    public static Assignment restore(String id, String caseId, String resourceId, AssignmentRole role,
+                                     AssignmentStatus status, Instant assignedAt) {
+        return new Assignment(id, caseId, resourceId, role, status, assignedAt);
+    }
+
+    // Both ways in (new trip, restored trip) end here, so the checks live in one place.
+    private Assignment(String id, String caseId, String resourceId, AssignmentRole role,
+                       AssignmentStatus status, Instant assignedAt) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("id is required");
+        }
         if (caseId == null || caseId.isBlank()) {
             throw new IllegalArgumentException("caseId is required");
         }
@@ -39,13 +69,17 @@ public class Assignment {
         if (role == null) {
             throw new IllegalArgumentException("role is required");
         }
+        if (status == null) {
+            throw new IllegalArgumentException("status is required");
+        }
         if (assignedAt == null) {
             throw new IllegalArgumentException("assignedAt is required");
         }
-        this.id = UUID.randomUUID().toString();
+        this.id = id;
         this.caseId = caseId;
         this.resourceId = resourceId;
         this.role = role;
+        this.status = status;
         this.assignedAt = assignedAt;
     }
 

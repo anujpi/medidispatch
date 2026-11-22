@@ -176,4 +176,53 @@ public class AssignmentTest {
         assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
         assertEquals(AssignmentRole.PRIMARY, a.role());
     }
+
+    // ---- restore: rebuilding a stored trip (used by storage adapters) ----
+
+    /** restore keeps the saved id (no new random one), role and status. */
+    @Test
+    void restoreRebuildsEveryField() {
+        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.SUPPORT, AssignmentStatus.EN_ROUTE, ASSIGNED_AT);
+
+        assertEquals("t1", a.id());
+        assertEquals("c1", a.caseId());
+        assertEquals("u1", a.resourceId());
+        assertEquals(AssignmentRole.SUPPORT, a.role());
+        assertEquals(AssignmentStatus.EN_ROUTE, a.status());
+        assertEquals(ASSIGNED_AT, a.assignedAt());
+    }
+
+    /** A restored trip still obeys its rules: a finished trip cannot restart or be demoted. */
+    @Test
+    void aRestoredTripStillObeysTheRules() {
+        Assignment a = Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.DONE, ASSIGNED_AT);
+
+        assertThrows(IllegalStateException.class, () -> a.transitionTo(AssignmentStatus.EN_ROUTE));
+        assertThrows(IllegalStateException.class, () -> a.demoteToSupport());
+        assertEquals(AssignmentStatus.DONE, a.status());
+        assertEquals(AssignmentRole.PRIMARY, a.role());
+    }
+
+    /** restore checks its arguments like the constructor, plus the id and the status. */
+    @Test
+    void restoreRejectsMissingValues() {
+        assertThrows(IllegalArgumentException.class,
+                () -> Assignment.restore(" ", "c1", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class,
+                () -> Assignment.restore("t1", "c1", "u1", AssignmentRole.PRIMARY, null, ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class,
+                () -> Assignment.restore("t1", "c1", "u1", null, AssignmentStatus.ASSIGNED, ASSIGNED_AT));
+        assertThrows(IllegalArgumentException.class,
+                () -> Assignment.restore("t1", "", "u1", AssignmentRole.PRIMARY, AssignmentStatus.ASSIGNED, ASSIGNED_AT));
+    }
+
+    /** The public constructor is unchanged: a new random id each time, starting in ASSIGNED. */
+    @Test
+    void aNewTripStillGetsItsOwnIdAndStartsAssigned() {
+        Assignment a = new Assignment("c1", "u1", AssignmentRole.PRIMARY, ASSIGNED_AT);
+        Assignment b = new Assignment("c1", "u1", AssignmentRole.PRIMARY, ASSIGNED_AT);
+
+        assertNotEquals(a.id(), b.id());
+        assertEquals(AssignmentStatus.ASSIGNED, a.status());
+    }
 }

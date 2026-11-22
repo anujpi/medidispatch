@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (612 tests: 510 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 17 in dispatch-service)
+## Built so far (663 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 56 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -113,6 +113,8 @@ mvn is not on PATH, but the Maven wrapper's download works offline (Spring Boot 
 `~/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn -o -q test`
 (one module: `-pl dispatch-service -am`; one class: `-Dtest=X -Dsurefire.failIfNoSpecifiedTests=false`), then read
 `<module>/target/surefire-reports/*.xml`. The Mockito self-attach warning is harmless.
+SchemaTest (and later every database test) needs Docker Desktop running; images timescale/timescaledb-ha:pg17 and
+testcontainers/ryuk are cached. A newly added dependency needs one run without -o to download it.
 Older way, still works for the non-Spring modules: compile and run the suite with IntelliJ's bundled JDK
 ("C:/Program Files/JetBrains/IntelliJ IDEA 2026.2.0.1/jbr/bin" javac/java) plus the JUnit 5.11.4 / platform 1.11.4
 jars from ~/.m2, building into its scratchpad (nothing written to the project). Classpaths need Windows paths (cygpath -w).
@@ -345,8 +347,79 @@ everyone's update.
 - Watching it by hand on Windows: `curl.exe -N http://localhost:8080/api/live` (plain `curl` in Windows PowerShell is
   Invoke-WebRequest, which waits for the response to end).
 
+## Database schema (DONE, tested)
+- docker-compose.yml (root): one service `db`, image timescale/timescaledb-ha:pg17 (Postgres 17 + PostGIS +
+  TimescaleDB), db/user/password all `medidispatch` (ponytail: plain-text dev password), port 5432, named volume
+  dbdata mounted at /home/postgres/pgdata/data (this image's data dir, NOT /var/lib/postgresql/data).
+- dispatch-service/src/main/resources/db/migration/V1__init.sql (Flyway; never edit after it has run, add V2...).
+  Conventions: text ids; enums as text + CHECK; geography(Point, 4326), LONGITUDE FIRST (ST_Point(lon, lat, 4326)),
+  metres; timestamptz everywhere (driver maps it to OffsetDateTime: instant.atOffset(ZoneOffset.UTC)).
+  Tables: patients(id, home); cases(id, patient_id, status, band, opened_at, queued) with partial unique index
+  one_open_case_per_patient (status NOT IN CLOSED/CANCELLED; also serves findOpen) and partial index queued_cases
+  (opened_at) WHERE queued (the CaseQueue is this flag; order = band CRITICAL first, then opened_at, then id, like
+  InMemoryCaseQueue); units(id, type, status, position, moved_from, last_seen_at, last_moved_at, claimed_by -> cases)
+  with GiST index on position; assignments(id, case_id, unit_id, role, status, assigned_at) with index on case_id and
+  partial unique index one_active_trip_per_unit (ASSIGNED/EN_ROUTE/ARRIVED); vitals hypertable (1-day chunks),
+  nullable measurements, PRIMARY KEY (patient_id, at) = Timescale's rule + duplicate detector + latestFor.
+  The claim: UPDATE units SET claimed_by = :case WHERE id = :unit AND (claimed_by IS NULL OR claimed_by = :case)
+  (1 row = won); release: SET claimed_by = NULL WHERE id = ? AND claimed_by = ?.
+- Decisions: one image; text + CHECK; claimed_by column (not a claims table); queued flag; vitals compression /
+  retention / continuous aggregates later in their own migration (ponytail note in V1); NO version columns
+  (optimistic locking) while DispatchService's one lock serialises writes: add them, with a two-thread test that loses
+  an update first, when the lock goes. Adapters should update only the columns that change.
+- pom (dispatch-service): flyway-core, flyway-database-postgresql, postgresql, testcontainers-postgresql, all TEST
+  scope for now (versions from Boot's BOM: Flyway 12.4.0, driver 42.7.13, Testcontainers 2.0.5; TC 2 class is
+  org.testcontainers.postgresql.PostgreSQLContainer, not generic). The app itself does not touch the database yet.
+- SchemaTest (service.persistence, 8 tests, plain JDBC, no Spring): uses the shared TestDatabase (see adapters
+  below), tables emptied before each test.
+  Race test: connection a claims inside a transaction, b (other thread) is still waiting after 300 ms, a commits,
+  b gets 0 rows. Also: re-claim/release semantics, one open case (23505), one active trip (23505), CHECK (23514),
+  duplicate reading (23505) + latest, hypertable listed in timescaledb_information.hypertables, ST_DWithin 5 km finds
+  the 2 km unit not the 20 km one, ST_Distance about 2000 m. Harmless Flyway warning: extension "timescaledb" already
+  exists (this image pre-creates it).
+
+## Database adapters (IN PROGRESS: 3a done, 3b and 3c to go), package com.medidispatch.service.persistence
+Split into 3 pieces. 3a (DONE): patients, units, claimer. 3b: cases, queue, vitals on JDBC (F) + trips on JPA (L).
+3c: EngineConfig switches to the adapters, each DispatchService call one transaction INSIDE the lock, all Spring tests
+on Postgres.
+Decisions: JdbcClient + hand-written SQL for the engine's ports; JPA (separate TripEntity + mapper, Spring Data
+method-name queries, saveAndFlush so SQL runs at save() like JDBC, ddl-auto=validate because Flyway owns the schema)
+only for AssignmentRepository and later users/roles; static restore(...) in core; service always on Postgres (in-memory
+adapters stay for core tests and the simulator); one Testcontainers test class per adapter + the whole Spring suite on
+Postgres in 3c (no shared contract test-jar); TransactionTemplate inside the synchronized methods (NOT @Transactional on
+top: the proxy would commit after the lock is released, and the next thread would read stale data); EventPublisher
+stays in memory (outbox when something outside listens).
+Rules: each column has ONE owning adapter (cases.queued -> queue, units.claimed_by -> claimer; the repositories never
+write them: CaseManager enqueues BEFORE it saves the case). The engine calls save() after every change (checked:
+CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes a database adapter possible.
+- Core: Case.restore(id, patientId, status, band, openedAt), Resource.restore(id, type, status, location, movedFrom,
+  lastSeenAt, lastMovedAt) (null times = never), Assignment.restore(id, caseId, resourceId, role, status, assignedAt)
+  (Assignment now has one private constructor with all checks; the public one passes a random UUID and ASSIGNED);
+  Resource.movedFrom() getter added. Restored objects obey the state machines as usual (tested).
+- pom: spring-jdbc (plain library, main scope; NOT the Boot starter, which would auto-create a DataSource while the
+  app still runs in memory). Flyway, driver, Testcontainers still test scope until 3c.
+- DbTime: Instant <-> OffsetDateTime at UTC (the driver's type for timestamptz), null stays null; Postgres keeps
+  microseconds.
+- JdbcPatientRepository: upsert (INSERT ... ON CONFLICT (id) DO UPDATE SET home = excluded.home); reads ST_Y = lat,
+  ST_X = lon (::geometry needed).
+- JdbcResourceRepository: upsert of every column EXCEPT claimed_by; nullable times bound with
+  Types.TIMESTAMP_WITH_TIMEZONE (a null alone has no type); findAvailableNear / findAssignedNear: validates like in
+  memory, empty type set returns early (a list param expands to IN (?, ?, ...), empty = invalid SQL), ST_DWithin(...,
+  metres, false) + ORDER BY ST_Distance(..., false), id: false = sphere, same maths as Location.distanceKmTo, so both
+  adapters agree; findAll ORDER BY id.
+- JdbcResourceClaimer: tryClaim = UPDATE ... WHERE id AND (claimed_by IS NULL OR = case), rows == 1; release only by
+  the holder; claimedBy selects WHERE claimed_by IS NOT NULL (no row = empty). Difference from memory: a unit that
+  does not exist cannot be claimed (false). claimed_by references cases, so the case must be saved first.
+- Tests: TestDatabase (test folder) = ONE container for the whole run (started on first use, Flyway once, Ryuk removes
+  it at JVM end), DriverManagerDataSource (new connection per request, no pool), jdbc(), reset() = TRUNCATE all five
+  tables, openCase(id) inserts patient "p-" + id and an ALERTED case. Every database test calls reset() in
+  @BeforeEach. JdbcPatientRepositoryTest (5), JdbcResourceRepositoryTest (15: every field round-trips, null = never,
+  saving leaves the claim alone, radius/status/type filters, nearest then id, assigned search, findAll, and
+  givesTheSameAnswersAsTheInMemoryRepository: 60 random units, seed 42, same ids in the same order from 4 centers),
+  JdbcResourceClaimerTest (11, including 20 threads on separate connections, exactly one wins).
+
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: Postgres + PostGIS + TimescaleDB in docker-compose and the
-Flyway schema (L for the schema, F for the rest). Then database adapters + Testcontainers, hospitals, the simulator
+Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3b (JDBC for cases, the queue with FOR UPDATE SKIP
+LOCKED, vitals; JPA for trips, starting with the JPA lesson), then 3c (the switch-over). Then hospitals, the simulator
 over HTTP.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

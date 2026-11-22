@@ -46,6 +46,30 @@ public class Case {
     }
 
     /**
+     * Rebuilds a case that already exists (read back from storage), in the status it was saved in.
+     * <p>
+     * For storage adapters only. The constructor always starts in MONITORING and
+     * {@link #transitionTo(CaseStatus)} only allows legal moves, so a CLOSED or CANCELLED case could never be
+     * rebuilt through them. From then on the restored case obeys every rule as usual.
+     *
+     * @param id        unique case id; never blank
+     * @param patientId the patient this case is about; never blank
+     * @param status    its saved status
+     * @param band      its saved urgency
+     * @param openedAt  when it was opened
+     * @return the rebuilt case
+     * @throws IllegalArgumentException if an id is blank or any argument is missing
+     */
+    public static Case restore(String id, String patientId, CaseStatus status, RiskBand band, Instant openedAt) {
+        if (status == null) {
+            throw new IllegalArgumentException("status is required");
+        }
+        Case c = new Case(id, patientId, band, openedAt);
+        c.status = status;
+        return c;
+    }
+
+    /**
      * Moves the case to a new status, if the move is allowed.
      *
      * @param next the status to move to

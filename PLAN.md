@@ -21,8 +21,8 @@ and warns it before the patient arrives.
 | `dispatch-core` | pure-Java engine: scoring placeholder, cases, response ladder, ring search, claim, preemption, first responders, response upgrade, timeouts, trip monitoring, recovery, back in service |
 | `dispatch-sim` | seeded 2-hour simulation + endless threaded live city (`LiveSimulation`) |
 | `dispatch-sim-fx` | JavaFX window: live map, panel, report |
-| tests | 612 (510 core, 63 sim, 22 fx, 17 service) |
-| `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); in memory. Postgres next |
+| tests | 620 (510 core, 63 sim, 22 fx, 25 service) |
+| `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); in memory. Database schema (Flyway V1) tested on a real container; adapters next |
 
 ---
 
@@ -186,7 +186,7 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
 - [x] `DispatchService`: the single front door, the lock, the dispatch loop (L)
 - [x] REST: request/response records, controllers, error handling (F) — HTTP + idempotency lesson (L)
 - [x] SSE live feed for screens (L)
-- [ ] Postgres + PostGIS + TimescaleDB in docker-compose; Flyway schema (L for the schema, F for the rest)
+- [x] Postgres + PostGIS + TimescaleDB in docker-compose; Flyway schema (L for the schema, F for the rest)
 - [ ] database adapters for the ports, Testcontainers tests (L for the claim and nearest search, F for the rest)
 - [ ] hospitals: domain, registry, destination choice, second trip leg, pre-alert data (L)
 - [ ] the simulator drives the service over HTTP (F)
