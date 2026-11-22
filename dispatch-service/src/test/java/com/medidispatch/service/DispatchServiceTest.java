@@ -394,4 +394,105 @@ class DispatchServiceTest {
         assertEquals("h1", shown.get(0).id());
         assertFalse(shown.get(0).accepting());
     }
+
+    // ---- the hospital's own views (H3c) ----
+
+    /** Minutes the pre-alert should show for an ambulance at {@code from} going to {@code to}. */
+    private static long expectedEta(Location from, Location to) {
+        return (long) Math.ceil(from.distanceKmTo(to) / DispatchService.TRANSPORT_SPEED_KMH * 60);
+    }
+
+    /** Only the units based at the facility, sorted by id, whatever they are doing; unknown facility: not found. */
+    @Test
+    void aFacilitySeesOnlyItsOwnFleet() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
+        service.registerFacility(Facility.clinic("c-lane", "Lane Clinic", kmNorth(1)));
+        service.registerUnit("amb-2", ResourceType.AMBULANCE_BLS, NEARBY, "h-apollo");
+        service.registerUnit("amb-1", ResourceType.AMBULANCE_ALS, NEARBY, "h-apollo");
+        service.registerUnit("nurse-1", ResourceType.NURSE, NEARBY, "c-lane");
+        service.registerUnit("free-1", ResourceType.NURSE, NEARBY, null);
+
+        List<String> ids = new ArrayList<>();
+        for (UnitInfo u : service.fleetOf("h-apollo")) {
+            ids.add(u.id());
+        }
+        assertEquals(List.of("amb-1", "amb-2"), ids);
+        assertEquals(1, service.fleetOf("c-lane").size());
+        assertThrows(NotFoundException.class, () -> service.fleetOf("nowhere"));
+    }
+
+    /**
+     * Mrs. Sharma's pre-alert at Apollo: band, needs, the ambulance, the ETA from where it is, her newest vitals.
+     * City General (not chosen) sees nobody coming.
+     */
+    @Test
+    void theChosenHospitalSeesThePatientComing() {
+        service.registerFacility(Facility.hospital("h-general", "City General", kmNorth(3), Set.of(), true));
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(Capability.STROKE), true));
+        String tripId = arrivedTrip();
+        service.startTransport(tripId, Set.of(Capability.STROKE));
+
+        List<InboundPatient> inbound = service.inboundTo("h-apollo");
+
+        assertEquals(1, inbound.size());
+        InboundPatient sharma = inbound.get(0);
+        assertEquals(tripId, sharma.tripId());
+        assertEquals("p1", sharma.patientId());
+        assertEquals(RiskBand.CRITICAL, sharma.band());
+        assertEquals(Set.of(Capability.STROKE), sharma.needs());
+        assertEquals("u1", sharma.unitId());
+        assertEquals(ResourceType.AMBULANCE_ALS, sharma.unitType());
+        assertEquals(expectedEta(NEARBY, kmNorth(9)), sharma.etaMinutes());
+        assertEquals(150, sharma.latestVitals().heartRate());
+        assertTrue(service.inboundTo("h-general").isEmpty());
+        assertThrows(NotFoundException.class, () -> service.inboundTo("nowhere"));
+    }
+
+    /** The ETA comes from the ambulance's live position, so it drops as the ambulance reports closer in. */
+    @Test
+    void theEtaDropsAsTheAmbulanceComesCloser() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
+        String tripId = arrivedTrip();
+        service.startTransport(tripId, Set.of());
+        long before = service.inboundTo("h-apollo").get(0).etaMinutes();
+
+        service.reportPosition("u1", kmNorth(6));
+
+        long after = service.inboundTo("h-apollo").get(0).etaMinutes();
+        assertEquals(expectedEta(kmNorth(6), kmNorth(9)), after);
+        assertTrue(after < before);
+    }
+
+    /** After the handover the patient is no longer on the way in. */
+    @Test
+    void afterTheHandoverNobodyIsComing() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
+        String tripId = arrivedTrip();
+        service.startTransport(tripId, Set.of());
+
+        service.completeTrip(tripId);
+
+        assertTrue(service.inboundTo("h-apollo").isEmpty());
+    }
+
+    /** Two patients on the way: the one arriving sooner is listed first, whatever order they set off in. */
+    @Test
+    void theSoonestArrivalIsListedFirst() {
+        service.registerFacility(Facility.hospital("h-apollo", "Apollo", kmNorth(9), Set.of(), true));
+        String first = arrivedTrip();
+        service.startTransport(first, Set.of());
+        service.registerPatient("p2", HOME);
+        service.registerUnit("u2", ResourceType.AMBULANCE_ALS, NEARBY, null);
+        service.submitReading(critical("p2"));
+        service.tick();
+        String second = service.activeTripOf("u2").orElseThrow().id();
+        service.acceptTrip(second);
+        service.arrive(second);
+        service.startTransport(second, Set.of());
+
+        service.reportPosition("u2", kmNorth(8));                    // 1 km out; u1 is still about 8 km out
+
+        List<InboundPatient> inbound = service.inboundTo("h-apollo");
+        assertEquals(List.of(second, first), List.of(inbound.get(0).tripId(), inbound.get(1).tripId()));
+    }
 }

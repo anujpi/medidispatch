@@ -25,6 +25,7 @@ import com.medidispatch.core.port.CaseRepository;
 import com.medidispatch.core.port.FacilityRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceRepository;
+import com.medidispatch.core.port.VitalsRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -61,6 +62,13 @@ import java.util.Set;
 @Service
 public class DispatchService {
 
+    /**
+     * Ambulance speed for the pre-alert ETA, on a straight line to the hospital.
+     */
+    // ponytail: straight line at a fixed 40 km/h, no roads or traffic; a routing service later (BACKLOG: ETA instead
+    // of straight-line distance).
+    public static final double TRANSPORT_SPEED_KMH = 40;
+
     private final PatientRepository patients;
     private final ResourceRepository resources;
     private final CaseRepository cases;
@@ -74,6 +82,7 @@ public class DispatchService {
     private final TripMonitor tripMonitor;
     private final FacilityRepository facilities;
     private final TransportCoordinator transport;
+    private final VitalsRepository vitals;
     private final Clock clock;
     private final TransactionTemplate tx;
 
@@ -93,6 +102,7 @@ public class DispatchService {
      * @param tripMonitor       finds trips whose unit went silent or stopped moving
      * @param facilities        where hospitals and clinics are stored
      * @param transport         starts the second leg of a trip, scene to hospital
+     * @param vitals            the patients' readings (the pre-alert shows the newest)
      * @param clock             the engine's clock, used to timestamp snapshots
      * @param tx                runs a piece of work as one database transaction (created by Boot)
      */
@@ -100,8 +110,8 @@ public class DispatchService {
                            AssignmentRepository assignments, VitalsProcessor processor, CaseManager caseManager,
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
                            DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
-                           FacilityRepository facilities, TransportCoordinator transport, Clock clock,
-                           TransactionTemplate tx) {
+                           FacilityRepository facilities, TransportCoordinator transport, VitalsRepository vitals,
+                           Clock clock, TransactionTemplate tx) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -115,6 +125,7 @@ public class DispatchService {
         this.tripMonitor = tripMonitor;
         this.facilities = facilities;
         this.transport = transport;
+        this.vitals = vitals;
         this.clock = clock;
         this.tx = tx;
     }
@@ -412,6 +423,68 @@ public class DispatchService {
      */
     public synchronized List<FacilityInfo> facilities() {
         return tx.execute(status -> facilityInfos());
+    }
+
+    /**
+     * A facility's own fleet: every unit based there, whatever it is doing now.
+     *
+     * @param facilityId the hospital or clinic
+     * @return its units, sorted by id
+     * @throws NotFoundException if there is no such facility
+     */
+    // ponytail: filters every unit in Java (hundreds at most, and the live snapshot reads them all every second
+    // anyway). A findByBaseId query with an index on units.base_id if a city ever has thousands.
+    public synchronized List<UnitInfo> fleetOf(String facilityId) {
+        return tx.execute(status -> {
+            requireFacility(facilityId);
+            List<UnitInfo> fleet = new ArrayList<>();
+            for (Resource r : resources.findAll()) {
+                if (r.baseId().isPresent() && r.baseId().get().equals(facilityId)) {
+                    fleet.add(UnitInfo.from(r));
+                }
+            }
+            return fleet;
+        });
+    }
+
+    /**
+     * A hospital's pre-alert: every patient being taken there right now, soonest first (then by trip id), with how
+     * urgent they are, what they need, where the ambulance is, the ETA and the newest vitals reading.
+     *
+     * <p>The ETA is the straight-line distance from the ambulance's last reported position at
+     * {@link #TRANSPORT_SPEED_KMH}, rounded UP to whole minutes, so it never says 0 while the ambulance is still on
+     * its way. It drops as the ambulance reports positions closer in. Screens poll this every few seconds.
+     *
+     * @param facilityId the hospital
+     * @return the patients on their way in; empty for a clinic or when nobody is coming
+     * @throws NotFoundException if there is no such facility
+     */
+    public synchronized List<InboundPatient> inboundTo(String facilityId) {
+        return tx.execute(status -> {
+            Facility hospital = requireFacility(facilityId);
+            List<InboundPatient> inbound = new ArrayList<>();
+            // ponytail: reads every active trip (tens) and keeps this hospital's; an index on
+            // (hospital_id) WHERE status = 'TRANSPORTING' if that ever gets slow.
+            for (Assignment trip : assignments.findActive()) {
+                boolean comingHere = trip.status() == AssignmentStatus.TRANSPORTING
+                        && trip.hospitalId().isPresent() && trip.hospitalId().get().equals(facilityId);
+                if (!comingHere) {
+                    continue;
+                }
+                // Safe: a trip always has its case and unit (foreign keys).
+                Case c = cases.findById(trip.caseId()).orElseThrow();
+                Resource unit = resources.findById(trip.resourceId()).orElseThrow();
+                double km = unit.location().distanceKmTo(hospital.location());
+                long etaMinutes = (long) Math.ceil(km / TRANSPORT_SPEED_KMH * 60);
+                VitalsReading latest = vitals.latestFor(c.patientId()).orElse(null);
+                inbound.add(InboundPatient.from(trip, c, unit, km, etaMinutes, latest));
+            }
+            inbound.sort((a, b) -> {
+                int byEta = Long.compare(a.etaMinutes(), b.etaMinutes());
+                return byEta != 0 ? byEta : a.tripId().compareTo(b.tripId());
+            });
+            return inbound;
+        });
     }
 
     public synchronized Optional<UnitInfo> findUnit(String unitId) {

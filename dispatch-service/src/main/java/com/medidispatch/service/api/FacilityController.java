@@ -2,7 +2,9 @@ package com.medidispatch.service.api;
 
 import com.medidispatch.service.DispatchService;
 import com.medidispatch.service.FacilityInfo;
+import com.medidispatch.service.InboundPatient;
 import com.medidispatch.service.NotFoundException;
+import com.medidispatch.service.UnitInfo;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,7 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * HTTP endpoints for hospitals and clinics. The operator adds them; each hospital switches its own diversion.
+ * HTTP endpoints for hospitals and clinics. The operator adds them; each hospital switches its own diversion and
+ * sees its own fleet and the patients on their way in.
  */
 // ponytail: no login yet, so any caller can act for any hospital (BACKLOG: hospital access control).
 @RestController
@@ -64,6 +67,30 @@ public class FacilityController {
     @GetMapping("/{id}")
     public FacilityInfo find(@PathVariable String id) {
         return service.findFacility(id).orElseThrow(() -> new NotFoundException("Facility " + id + " not found"));
+    }
+
+    /**
+     * {@code GET /api/facilities/{id}/units}: the facility's own fleet. 200 (an empty list if it has no units) or
+     * 404.
+     *
+     * @param id the facility
+     * @return the units based there, sorted by id
+     */
+    @GetMapping("/{id}/units")
+    public List<UnitInfo> fleet(@PathVariable String id) {
+        return service.fleetOf(id);
+    }
+
+    /**
+     * {@code GET /api/facilities/{id}/inbound}: the pre-alert, patients on their way in, soonest first. Screens poll
+     * it every few seconds. 200 (an empty list for a clinic or when nobody is coming) or 404.
+     *
+     * @param id the hospital
+     * @return the patients on their way, with ETA and newest vitals
+     */
+    @GetMapping("/{id}/inbound")
+    public List<InboundPatient> inbound(@PathVariable String id) {
+        return service.inboundTo(id);
     }
 
     /**

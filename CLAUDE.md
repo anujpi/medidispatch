@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (833 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 153 in dispatch-service)
+## Built so far (839 tests: 595 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 159 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to),
 Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine), Patient, Assignment (entity, with
@@ -508,7 +508,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
   same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
-## Hospitals (H1, H1b, H2, H3a, H3b written; H3c to do)
+## Hospitals (DONE: H1, H1b, H2, H3a, H3b, H3c)
 - Capability enum: CARDIAC, STROKE, TRAUMA, PAEDIATRIC. FacilityKind: HOSPITAL, CLINIC.
 - Facility record (id, name, location, kind, capabilities, accepting) replaced H1's Hospital: one record with a kind,
   because hospitals and clinics differ only in canTreat. Compact constructor: blank id/name, null location/kind/
@@ -573,8 +573,20 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   Tests: DispatchServiceTest +8 (register/list/find, duplicate, diversion, base must exist, Mrs. Sharma end to end,
   repeated transport, no hospital = nothing changes, snapshot facilities); ApiTest +3 (facilities over HTTP, bad
   facility requests 400, Kolkata transport over HTTP with a based ambulance).
-- H3c next (F): GET /api/facilities/{id}/units (its fleet) and /inbound (pre-alert: TRANSPORTING trips to it, band,
-  latest vitals, needs, ETA = straight line at 40 km/h from the unit's live position, ponytail).
+- H3c (hospital views): DispatchService.TRANSPORT_SPEED_KMH = 40 (public; ponytail: straight line, no roads).
+  DispatchService also takes VitalsRepository (constructor: ..., facilities, transport, vitals, clock, tx).
+  fleetOf(id): units whose baseId is the facility, sorted by id (filters resources.findAll() in Java; ponytail:
+  findByBaseId + index at thousands). inboundTo(id): active trips that are TRANSPORTING with this hospitalId; per
+  trip the case (band), the unit (live position), vitals.latestFor(patient) (null if none); distance = unit ->
+  hospital; etaMinutes = ceil(km / 40 * 60) (rounded UP: never 0 while still out); sorted by eta, then trip id.
+  Both: unknown facility -> NotFoundException (404); nothing -> []. InboundPatient record (tripId, caseId,
+  patientId, band, needs, unitId, unitType, latitude, longitude, distanceKm, etaMinutes, latestVitals).
+  FacilityController: GET /{id}/units, GET /{id}/inbound. Decided: filter in Java, no new SQL; screens POLL
+  /inbound every few seconds (the global live feed carries no vitals); latest reading only (history = BACKLOG);
+  SBAR is the week-2 screen's presentation, not an API field.
+  Tests: DispatchServiceTest +5 (own fleet only, chosen hospital sees the patient with band/needs/ETA/vitals and
+  the other sees nobody, ETA drops after a position report, empty after handover, soonest first); ApiTest +1 (Pune:
+  fleet, pre-alert with etaMinutes 2 = 1.05 km rounded up, empty after complete, 404s).
 - Registration (decided Nov 22): the OPERATOR adds facilities (POST /facilities; the simulator plays the operator);
   self sign-up is skipped (trust: a fake hospital must never get patients). Each hospital manages its own:
   PUT /facilities/{id}/accepting, POST /units with baseId (base must exist), GET /facilities/{id}/units (its fleet),
@@ -583,6 +595,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
 
 ## Next steps
 Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
-hospitals H3c (hospital views: fleet and inbound pre-alert; F). Then the
-simulator drives the service over HTTP and registers hospitals and clinics; units start at and return to their base (F).
+the simulator drives the service over HTTP (F): it registers hospitals and clinics, units start at their base,
+crews transport patients and units return to their base (the "return to base" leg does not exist yet: decide in
+that piece). Hospitals are done.
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

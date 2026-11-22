@@ -241,6 +241,8 @@ Web requests arrive on many threads at once, so every method holds one shared lo
 | `POST /api/trips/{id}/transport` | the crew takes the patient to hospital, e.g. `{"needs": ["STROKE"]}`; the engine picks the hospital |
 | `POST /api/facilities`, `GET /api/facilities`, `GET /api/facilities/{id}` | the operator adds hospitals and clinics; list or look one up |
 | `PUT /api/facilities/{id}/accepting` | a hospital declares diversion (`{"accepting": false}`) or ends it |
+| `GET /api/facilities/{id}/units` | a hospital or clinic's own fleet |
+| `GET /api/facilities/{id}/inbound` | the pre-alert: patients on their way in, soonest first, with urgency, needs, ETA and latest vitals |
 | `POST /api/units/{id}/back-in-service` | an offline unit is ready again |
 | `GET /api/cases/{id}`, `/api/patients/{id}/case`, `/api/units/{id}`, `/api/trips/{id}` | look things up |
 
@@ -268,7 +270,9 @@ The database knows about hospitals too. A new migration adds the facilities tabl
 
 The hospital side is open over HTTP: the operator registers hospitals and clinics, a hospital switches its own diversion, units can be registered with their base, and the crew tells the service it is taking the patient in. The answer says which hospital was chosen. Every step is safe to repeat on a weak network, and the live feed now includes the hospitals with their diversion status.
 
-Next: the hospital's own screen data (its fleet and the patients on their way), then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+Each hospital also sees its own fleet and a **pre-alert** of the patients on their way in: how urgent each one is, what they need (for example a stroke team), where the ambulance is, an estimated arrival time and their latest vitals. The arrival time comes from the ambulance's live position (a straight line at 40 km/h for now), so it counts down as the ambulance reports in, and the patient leaves the list at the handover.
+
+Next: the simulator driving the running service over HTTP, with hospitals, clinics and units based at them. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -309,7 +313,7 @@ Next: the hospital's own screen data (its fleet and the patients on their way), 
 - [x] Database adapters for cases, the dispatch queue and vitals
 - [x] The engine running on Postgres (one transaction per request); a trip survives a restart
 - [x] Hospitals and clinics: registry and destination choice (engine)
-- [ ] Hospitals: transport to hospital, hospital endpoints, pre-alert
+- [x] Hospitals: transport to hospital, hospital endpoints, pre-alert
 - [ ] The simulator driving the running service over HTTP
 - [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
 - [ ] OTP login, JWT and roles

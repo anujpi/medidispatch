@@ -354,4 +354,65 @@ class ApiTest {
         http.perform(get("/api/cases/" + caseId))
                 .andExpect(jsonPath("$.status").value("CLOSED"));
     }
+
+    // ---- the hospital's own views (H3c) ----
+
+    /**
+     * In Pune (far from every other test): the hospital's fleet, then the pre-alert while its ambulance brings a
+     * patient in (band, needs, ETA, newest vitals), and an empty pre-alert after the handover. Unknown ids are 404.
+     */
+    @Test
+    void aHospitalSeesItsFleetAndThePatientsComingOverHttp() throws Exception {
+        http.perform(post("/api/facilities").contentType(MediaType.APPLICATION_JSON)
+                        .content(hospital("pune-h1", 18.5300, 73.8600, "[\"CARDIAC\"]")))
+                .andExpect(status().isCreated());
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                        .content(patient("pune-p1", 18.5204, 73.8567)))
+                .andExpect(status().isCreated());
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id": "pune-u1", "type": "AMBULANCE_ALS",
+                                 "position": {"latitude": 18.5210, "longitude": 73.8570}, "baseId": "pune-h1"}
+                                """))
+                .andExpect(status().isCreated());
+
+        http.perform(get("/api/facilities/pune-h1/units"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value("pune-u1"));
+        http.perform(get("/api/facilities/pune-h1/inbound"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        http.perform(post("/api/readings").contentType(MediaType.APPLICATION_JSON)
+                        .content(criticalReading("pune-p1")))
+                .andExpect(status().isOk());
+        service.tick();
+        String tripId = JsonPath.read(http.perform(get("/api/units/pune-u1/trip"))
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        http.perform(post("/api/trips/" + tripId + "/accept")).andExpect(status().isOk());
+        http.perform(post("/api/trips/" + tripId + "/arrive")).andExpect(status().isOk());
+        http.perform(post("/api/trips/" + tripId + "/transport").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"needs": ["CARDIAC"]}
+                                """))
+                .andExpect(status().isOk());
+
+        http.perform(get("/api/facilities/pune-h1/inbound"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].patientId").value("pune-p1"))
+                .andExpect(jsonPath("$[0].band").value("CRITICAL"))
+                .andExpect(jsonPath("$[0].needs[0]").value("CARDIAC"))
+                .andExpect(jsonPath("$[0].unitId").value("pune-u1"))
+                .andExpect(jsonPath("$[0].etaMinutes").value(2))             // 1.05 km at 40 km/h = 1.6 min, rounded up
+                .andExpect(jsonPath("$[0].latestVitals.heartRate").value(150));
+
+        http.perform(post("/api/trips/" + tripId + "/complete")).andExpect(status().isOk());
+        http.perform(get("/api/facilities/pune-h1/inbound"))
+                .andExpect(jsonPath("$.length()").value(0));
+
+        http.perform(get("/api/facilities/pune-nowhere/units")).andExpect(status().isNotFound());
+        http.perform(get("/api/facilities/pune-nowhere/inbound")).andExpect(status().isNotFound());
+    }
 }
