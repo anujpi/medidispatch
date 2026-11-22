@@ -23,6 +23,7 @@ import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -38,12 +39,20 @@ import java.util.Optional;
  * {@code synchronized} on this one object, which means only one of them runs at any moment. Reads take the lock
  * too, because a read in the middle of another thread's write could see half-changed state.
  *
+ * <p>Every call is also ONE database transaction (all its writes happen, or none do), and the transaction lives
+ * INSIDE the lock: lock, BEGIN, work, COMMIT, unlock. {@code @Transactional} on the methods would get this backwards:
+ * Spring adds it with a proxy AROUND this object, so the lock would be released before the commit, and the next thread
+ * could read rows from before it (a unit that looks free, dispatched twice). {@link TransactionTemplate} opens and
+ * commits the transaction right here instead; if the work throws, it rolls back and re-throws. One transaction covers
+ * the JDBC and the JPA adapters alike.
+ *
  * <p>Methods return small immutable records ({@link CaseInfo}, {@link TripInfo}, {@link UnitInfo}) built while
  * the lock is held, never the engine's own mutable objects. A caller can keep them, send them as JSON or pass
  * them to another thread without ever touching live engine state.
  */
-// ponytail: one global lock, fine for the in-memory engine at demo scale. Revisit when Postgres arrives: the
-// database claim (UPDATE ... WHERE status='AVAILABLE') and transactions take over most of this job.
+// ponytail: one global lock around every call, so requests never run in parallel. Fine at demo scale on one
+// instance. For several instances or more throughput: drop the lock, keep the transactions, and add optimistic
+// locking (version columns), proven by a two-thread test that loses an update first.
 @Service
 public class DispatchService {
 
@@ -59,6 +68,7 @@ public class DispatchService {
     private final TimeoutMonitor timeoutMonitor;
     private final TripMonitor tripMonitor;
     private final Clock clock;
+    private final TransactionTemplate tx;
 
     /**
      * Spring calls this constructor and passes in the engine parts built by {@link EngineConfig}.
@@ -75,12 +85,13 @@ public class DispatchService {
      * @param timeoutMonitor    finds crews that never acknowledged a trip
      * @param tripMonitor       finds trips whose unit went silent or stopped moving
      * @param clock             the engine's clock, used to timestamp snapshots
+     * @param tx                runs a piece of work as one database transaction (created by Boot)
      */
     public DispatchService(PatientRepository patients, ResourceRepository resources, CaseRepository cases,
                            AssignmentRepository assignments, VitalsProcessor processor, CaseManager caseManager,
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
                            DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
-                           Clock clock) {
+                           Clock clock, TransactionTemplate tx) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -93,6 +104,7 @@ public class DispatchService {
         this.timeoutMonitor = timeoutMonitor;
         this.tripMonitor = tripMonitor;
         this.clock = clock;
+        this.tx = tx;
     }
 
     /**
@@ -103,11 +115,14 @@ public class DispatchService {
      * @throws IllegalStateException if a patient with this id already exists
      */
     public synchronized void registerPatient(String id, Location home) {
-        // Without this check, save() would silently replace the existing patient.
-        if (patients.findById(id).isPresent()) {
-            throw new IllegalStateException("Patient " + id + " already exists");
-        }
-        patients.save(new Patient(id, home));
+        // executeWithoutResult: a transaction for work that returns nothing.
+        tx.executeWithoutResult(status -> {
+            // Without this check, save() would silently replace the existing patient.
+            if (patients.findById(id).isPresent()) {
+                throw new IllegalStateException("Patient " + id + " already exists");
+            }
+            patients.save(new Patient(id, home));
+        });
     }
 
     /**
@@ -120,12 +135,15 @@ public class DispatchService {
      * @throws IllegalStateException if a unit with this id already exists
      */
     public synchronized UnitInfo registerUnit(String id, ResourceType type, Location where) {
-        if (resources.findById(id).isPresent()) {
-            throw new IllegalStateException("Unit " + id + " already exists");
-        }
-        Resource unit = new Resource(id, type, where);
-        resources.save(unit);
-        return UnitInfo.from(unit);
+        // execute: a transaction whose result (the lambda's return value) is handed back after the commit.
+        return tx.execute(status -> {
+            if (resources.findById(id).isPresent()) {
+                throw new IllegalStateException("Unit " + id + " already exists");
+            }
+            Resource unit = new Resource(id, type, where);
+            resources.save(unit);
+            return UnitInfo.from(unit);
+        });
     }
 
     /**
@@ -136,10 +154,12 @@ public class DispatchService {
      * @return what happened to the reading, and the patient's open case if there is one
      */
     public synchronized ReadingResult submitReading(VitalsReading reading) {
-        ProcessingResult result = processor.process(reading);
-        // Optional.map runs the lambda only if a case is present; orElse(null) turns "no case" into null.
-        CaseInfo openCase = result.currentCase().map(c -> caseInfo(c)).orElse(null);
-        return new ReadingResult(result.outcome(), openCase);
+        return tx.execute(status -> {
+            ProcessingResult result = processor.process(reading);
+            // Optional.map runs the lambda only if a case is present; orElse(null) turns "no case" into null.
+            CaseInfo openCase = result.currentCase().map(c -> caseInfo(c)).orElse(null);
+            return new ReadingResult(result.outcome(), openCase);
+        });
     }
 
     /**
@@ -154,13 +174,15 @@ public class DispatchService {
      * @throws IllegalStateException if the trip is neither ASSIGNED nor already EN_ROUTE
      */
     public synchronized TripInfo acceptTrip(String tripId) {
-        Assignment trip = requireTrip(tripId);
-        // Only the exact target state counts as "already done". Anything else (DONE, CANCELLED, TIMED_OUT...)
-        // goes to the engine, which refuses it.
-        if (trip.status() == AssignmentStatus.EN_ROUTE) {
-            return TripInfo.from(trip);
-        }
-        return TripInfo.from(assignmentManager.onEnRoute(tripId));
+        return tx.execute(status -> {
+            Assignment trip = requireTrip(tripId);
+            // Only the exact target state counts as "already done". Anything else (DONE, CANCELLED, TIMED_OUT...)
+            // goes to the engine, which refuses it.
+            if (trip.status() == AssignmentStatus.EN_ROUTE) {
+                return TripInfo.from(trip);
+            }
+            return TripInfo.from(assignmentManager.onEnRoute(tripId));
+        });
     }
 
     /**
@@ -171,8 +193,10 @@ public class DispatchService {
      * @throws NotFoundException if there is no such unit
      */
     public synchronized void reportPosition(String unitId, Location where) {
-        requireUnit(unitId);
-        unitTracker.onLocationReported(unitId, where);
+        tx.executeWithoutResult(status -> {
+            requireUnit(unitId);
+            unitTracker.onLocationReported(unitId, where);
+        });
     }
 
     /**
@@ -187,16 +211,19 @@ public class DispatchService {
      * @throws IllegalStateException if the trip is neither EN_ROUTE nor already ARRIVED
      */
     public synchronized TripInfo arrive(String tripId) {
-        Assignment trip = requireTrip(tripId);
-        if (trip.status() == AssignmentStatus.ARRIVED) {
-            return TripInfo.from(trip);
-        }
-        return TripInfo.from(assignmentManager.onArrived(tripId));
+        return tx.execute(status -> {
+            Assignment trip = requireTrip(tripId);
+            if (trip.status() == AssignmentStatus.ARRIVED) {
+                return TripInfo.from(trip);
+            }
+            return TripInfo.from(assignmentManager.onArrived(tripId));
+        });
     }
 
     /**
      * The crew finished on scene: the trip becomes DONE and the unit is free again. When the main (PRIMARY) unit
-     * finishes, the patient is treated as stabilised and the case is closed.
+     * finishes, the patient is treated as stabilised and the case is closed. All of it is one transaction: the trip
+     * is never DONE while its case stays open.
      *
      * <p>Safe to repeat: if the trip is already DONE, it is returned unchanged and the case is not touched again.
      *
@@ -206,18 +233,20 @@ public class DispatchService {
      * @throws IllegalStateException if the trip cannot be completed from its current status
      */
     public synchronized TripInfo completeTrip(String tripId) {
-        Assignment trip = requireTrip(tripId);
-        // Returning here matters: running on would close an already closed case and throw.
-        if (trip.status() == AssignmentStatus.DONE) {
-            return TripInfo.from(trip);
-        }
-        Assignment done = assignmentManager.complete(tripId);
-        // A support unit leaving does not end the case; only the main unit finishing does.
-        if (done.role() == AssignmentRole.PRIMARY) {
-            caseManager.onStabilised(done.caseId());
-            caseManager.close(done.caseId());
-        }
-        return TripInfo.from(done);
+        return tx.execute(status -> {
+            Assignment trip = requireTrip(tripId);
+            // Returning here matters: running on would close an already closed case and throw.
+            if (trip.status() == AssignmentStatus.DONE) {
+                return TripInfo.from(trip);
+            }
+            Assignment done = assignmentManager.complete(tripId);
+            // A support unit leaving does not end the case; only the main unit finishing does.
+            if (done.role() == AssignmentRole.PRIMARY) {
+                caseManager.onStabilised(done.caseId());
+                caseManager.close(done.caseId());
+            }
+            return TripInfo.from(done);
+        });
     }
 
     /**
@@ -229,9 +258,11 @@ public class DispatchService {
      * @throws IllegalStateException if the unit is not OFFLINE
      */
     public synchronized UnitInfo backInService(String unitId) {
-        requireUnit(unitId);
-        unitTracker.onBackInService(unitId);
-        return UnitInfo.from(resources.findById(unitId).orElseThrow());
+        return tx.execute(status -> {
+            requireUnit(unitId);
+            unitTracker.onBackInService(unitId);
+            return UnitInfo.from(resources.findById(unitId).orElseThrow());
+        });
     }
 
     /**
@@ -241,7 +272,7 @@ public class DispatchService {
      * @return the case, or empty if there is none with this id
      */
     public synchronized Optional<CaseInfo> findCase(String caseId) {
-        return cases.findById(caseId).map(c -> caseInfo(c));
+        return tx.execute(status -> cases.findById(caseId).map(c -> caseInfo(c)));
     }
 
     /**
@@ -251,32 +282,34 @@ public class DispatchService {
      * @return the patient's open case, or empty if they have none
      */
     public synchronized Optional<CaseInfo> openCaseOf(String patientId) {
-        return cases.findOpenByPatientId(patientId).map(c -> caseInfo(c));
+        return tx.execute(status -> cases.findOpenByPatientId(patientId).map(c -> caseInfo(c)));
     }
 
     /**
      * Everything a live screen shows, at this moment: every unit, every open case, every trip under way.
      *
-     * <p>Only copies state into immutable records, with no network I/O, so the lock is held for microseconds. The
-     * caller (the live feed) sends the result to screens AFTER the lock is released: a slow screen must never hold
-     * up dispatch.
+     * <p>One transaction, so the three lists come from the same moment. Only copies state into immutable records,
+     * with no network I/O, so the lock is held only for the reads. The caller (the live feed) sends the result to
+     * screens AFTER the lock is released: a slow screen must never hold up dispatch.
      *
      * @return the frozen picture, safe to read from any thread
      */
     public synchronized LiveSnapshot snapshot() {
-        List<UnitInfo> units = new ArrayList<>();
-        for (Resource r : resources.findAll()) {
-            units.add(UnitInfo.from(r));
-        }
-        List<CaseInfo> openCases = new ArrayList<>();
-        for (Case c : cases.findOpen()) {
-            openCases.add(caseInfo(c));
-        }
-        List<TripInfo> trips = new ArrayList<>();
-        for (Assignment a : assignments.findActive()) {
-            trips.add(TripInfo.from(a));
-        }
-        return new LiveSnapshot(clock.instant(), units, openCases, trips);
+        return tx.execute(status -> {
+            List<UnitInfo> units = new ArrayList<>();
+            for (Resource r : resources.findAll()) {
+                units.add(UnitInfo.from(r));
+            }
+            List<CaseInfo> openCases = new ArrayList<>();
+            for (Case c : cases.findOpen()) {
+                openCases.add(caseInfo(c));
+            }
+            List<TripInfo> trips = new ArrayList<>();
+            for (Assignment a : assignments.findActive()) {
+                trips.add(TripInfo.from(a));
+            }
+            return new LiveSnapshot(clock.instant(), units, openCases, trips);
+        });
     }
 
     /**
@@ -286,7 +319,7 @@ public class DispatchService {
      * @return the unit, or empty if there is none with this id
      */
     public synchronized Optional<UnitInfo> findUnit(String unitId) {
-        return resources.findById(unitId).map(r -> UnitInfo.from(r));
+        return tx.execute(status -> resources.findById(unitId).map(r -> UnitInfo.from(r)));
     }
 
     /**
@@ -296,7 +329,7 @@ public class DispatchService {
      * @return the trip, or empty if there is none with this id
      */
     public synchronized Optional<TripInfo> findTrip(String tripId) {
-        return assignments.findById(tripId).map(a -> TripInfo.from(a));
+        return tx.execute(status -> assignments.findById(tripId).map(a -> TripInfo.from(a)));
     }
 
     /**
@@ -306,39 +339,49 @@ public class DispatchService {
      * @return the unit's current trip, or empty if it has none
      */
     public synchronized Optional<TripInfo> activeTripOf(String unitId) {
-        return assignments.findActiveByResourceId(unitId).map(a -> TripInfo.from(a));
+        return tx.execute(status -> assignments.findActiveByResourceId(unitId).map(a -> TripInfo.from(a)));
     }
 
     /**
      * The heartbeat. Spring calls this once a second, counted from the end of the previous run ({@code fixedDelay}),
      * so two ticks never overlap. Each tick:
      * <ol>
-     *   <li>sends units to every waiting case it can serve,</li>
-     *   <li>takes back trips whose crew never acknowledged,</li>
-     *   <li>takes back trips whose unit went silent or stopped moving.</li>
+     *   <li>sends units to every waiting case it can serve, each case in its own transaction,</li>
+     *   <li>takes back trips whose crew never acknowledged (one transaction),</li>
+     *   <li>takes back trips whose unit went silent or stopped moving (one transaction).</li>
      * </ol>
-     * If a tick throws, Spring logs the error and still runs the next one.
+     * Small transactions on purpose: if dispatching case #3 fails, cases #1 and #2 stay dispatched; #3 rolls back
+     * and is tried again on the next tick. If a tick throws, Spring logs the error and still runs the next one.
      */
     @Scheduled(fixedDelay = 1000)
     public synchronized void tick() {
-        dispatchAll();
-        timeoutMonitor.checkTimeouts();
-        tripMonitor.checkTrips();
+        boolean sent = true;
+        while (sent) {
+            sent = dispatchOne();
+        }
+        tx.executeWithoutResult(status -> timeoutMonitor.checkTimeouts());
+        tx.executeWithoutResult(status -> tripMonitor.checkTrips());
     }
 
     /**
-     * Keeps dispatching until no more waiting cases can be served (the queue is empty, or no unit can be found for
-     * the next one). The coordinator only sends the unit; marking the case RESPONDING is done here, for the
-     * main unit only.
+     * Sends a unit to the next waiting case, as one transaction: take the case off the queue, claim the unit, save
+     * the trip, mark the case RESPONDING (main unit only). The coordinator only sends the unit; marking the case is
+     * done here.
+     *
+     * @return {@code true} if a unit was sent (so try the next case); {@code false} if the queue is empty or no unit
+     *         can be found for the next case
      */
-    private void dispatchAll() {
-        while (true) {
-            Optional<Assignment> sent = coordinator.dispatchNext();
-            if (sent.isEmpty()) {
-                return;
+    private boolean dispatchOne() {
+        Boolean sent = tx.execute(status -> {
+            Optional<Assignment> next = coordinator.dispatchNext();
+            if (next.isEmpty()) {
+                return false;
             }
-            caseManager.onAssigned(sent.get());
-        }
+            caseManager.onAssigned(next.get());
+            return true;
+        });
+        // execute is declared as "may return null"; comparing this way avoids unboxing a null.
+        return Boolean.TRUE.equals(sent);
     }
 
     /**

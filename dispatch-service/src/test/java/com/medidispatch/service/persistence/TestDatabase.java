@@ -9,15 +9,23 @@ import org.testcontainers.utility.DockerImageName;
 import javax.sql.DataSource;
 
 /**
- * One real database shared by every database test in the run (Testcontainers needs Docker running).
+ * One real Postgres shared by every database test in the run (Testcontainers needs Docker running).
  *
- * <p>The container starts the first time a test asks for it, Flyway applies the migrations once, and the
- * container lives until the JVM ends (Testcontainers' cleanup container, Ryuk, then removes it). Starting one
- * container per test class would cost 5-10 s each.
+ * <p>The container starts the first time a test asks for it and lives until the JVM ends (Testcontainers' cleanup
+ * container, Ryuk, then removes it). Starting one container per test class would cost 5-10 s each.
  *
- * <p>Tests call {@link #reset()} in {@code @BeforeEach}, so every test starts from empty tables whatever ran before.
+ * <p>It holds TWO databases, both migrated by Flyway at start:
+ * <ul>
+ *   <li>{@code test}: for the adapter tests (plain JDBC and the {@code @DataJpaTest} slice). Nothing runs in the
+ *       background here; tests call {@link #reset()} in {@code @BeforeEach}.</li>
+ *   <li>{@code app}: for tests that start the whole application ({@link TestDatabaseConfig}). Spring keeps started
+ *       test contexts alive until the end of the run, and their scheduled dispatch loop keeps ticking every second;
+ *       in the {@code test} database it would quietly poll the queue tests' cases. {@link #resetApp()} empties it.</li>
+ * </ul>
+ * Public (with {@link #resetApp()}, {@link #appUrlStarted()}, {@link #username()}, {@link #password()}) only so
+ * whole-application tests in other packages can use the {@code app} database.
  */
-final class TestDatabase {
+public final class TestDatabase {
 
     /**
      * The same image as docker-compose.yml. Testcontainers' Postgres class only accepts images it knows;
@@ -26,24 +34,40 @@ final class TestDatabase {
     private static final PostgreSQLContainer DB = new PostgreSQLContainer(
             DockerImageName.parse("timescale/timescaledb-ha:pg17").asCompatibleSubstituteFor("postgres"));
 
+    /** TRUNCATE takes every table at once, which satisfies the foreign keys; the schema stays. */
+    private static final String TRUNCATE_ALL = "TRUNCATE vitals, assignments, units, cases, patients";
+
     private static DataSource dataSource;
+    private static DataSource appDataSource;
 
     private TestDatabase() {
     }
 
     /**
-     * Starts the container and migrates it on the first call; later calls return the same DataSource.
+     * Starts the container, migrates {@code test}, creates and migrates {@code app}, on the first call; later calls
+     * return the same DataSource.
      *
-     * @return a DataSource for the test database. {@link DriverManagerDataSource} opens a new connection on every
-     *         request (no pool), which is all tests need, and lets concurrency tests get truly separate connections
+     * @return a DataSource for the {@code test} database. {@link DriverManagerDataSource} opens a new connection on
+     *         every request (no pool, auto-commit), which is all tests need, and lets concurrency tests get truly
+     *         separate connections
      */
     static synchronized DataSource dataSource() {
         if (dataSource == null) {
             DB.start();
             dataSource = new DriverManagerDataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword());
-            Flyway.configure().dataSource(dataSource).load().migrate();
+            migrate(dataSource);
+            // CREATE DATABASE cannot run inside a transaction; this connection is in auto-commit mode.
+            JdbcClient.create(dataSource).sql("CREATE DATABASE app").update();
+            appDataSource = new DriverManagerDataSource(appUrl(), DB.getUsername(), DB.getPassword());
+            // Migrated here too, so resetApp() works before any Spring context has started; Spring's own Flyway
+            // then finds V1 already applied.
+            migrate(appDataSource);
         }
         return dataSource;
+    }
+
+    private static void migrate(DataSource target) {
+        Flyway.configure().dataSource(target).load().migrate();
     }
 
     /**
@@ -53,9 +77,24 @@ final class TestDatabase {
         return JdbcClient.create(dataSource());
     }
 
-    /** Empties every table (the schema stays). Listing all of them at once satisfies the foreign keys. */
+    /** Empties every table of the {@code test} database. */
     static void reset() {
-        jdbc().sql("TRUNCATE vitals, assignments, units, cases, patients").update();
+        jdbc().sql(TRUNCATE_ALL).update();
+    }
+
+    /** Empties every table of the {@code app} database (whole-application tests). */
+    public static void resetApp() {
+        dataSource();
+        JdbcClient.create(appDataSource).sql(TRUNCATE_ALL).update();
+    }
+
+    /**
+     * Called from inside {@link #dataSource()} too, so it must not call it (the container is already started there).
+     *
+     * @return the JDBC URL of the {@code app} database: same server and port as {@code test}, other database
+     */
+    static String appUrl() {
+        return "jdbc:postgresql://" + DB.getHost() + ":" + DB.getMappedPort(5432) + "/app";
     }
 
     /**
@@ -88,20 +127,26 @@ final class TestDatabase {
 
     // For TestDatabaseConfig: each first makes sure the container is started and migrated.
 
-    /** @return the container's JDBC URL (a random port on localhost) */
+    /** @return the {@code app} database's JDBC URL, starting the container first if needed */
+    public static String appUrlStarted() {
+        dataSource();
+        return appUrl();
+    }
+
+    /** @return the {@code test} database's JDBC URL (a random port on localhost) */
     static String url() {
         dataSource();
         return DB.getJdbcUrl();
     }
 
     /** @return the container's user name */
-    static String username() {
+    public static String username() {
         dataSource();
         return DB.getUsername();
     }
 
     /** @return the container's password */
-    static String password() {
+    public static String password() {
         dataSource();
         return DB.getPassword();
     }

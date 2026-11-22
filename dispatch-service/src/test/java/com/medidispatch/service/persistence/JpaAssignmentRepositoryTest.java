@@ -12,9 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import javax.sql.DataSource;
 import java.time.Instant;
@@ -37,7 +38,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(TestDatabaseConfig.class)
 class JpaAssignmentRepositoryTest {
 
     private static final Location DELHI = new Location(28.6139, 77.2090);
@@ -51,6 +51,20 @@ class JpaAssignmentRepositoryTest {
     private DataSource dataSource;
 
     private JpaAssignmentRepository repo;
+
+    /**
+     * Points this slice at the {@code test} database, like the other adapter tests. {@code @DynamicPropertySource}
+     * is the per-class way to give Spring values known only at runtime (TestDatabaseConfig does the same job with a
+     * bean, for the whole-application tests).
+     *
+     * @param registry where the values go; they override application.properties
+     */
+    @DynamicPropertySource
+    static void adapterDatabase(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> TestDatabase.url());
+        registry.add("spring.datasource.username", () -> TestDatabase.username());
+        registry.add("spring.datasource.password", () -> TestDatabase.password());
+    }
 
     /** The plain JDBC tests leave their last rows committed; start this class from empty tables once. */
     @BeforeAll

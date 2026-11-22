@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (731 tests: 522 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 124 in dispatch-service)
+## Built so far (733 tests: 523 in dispatch-core, 63 in dispatch-sim, 22 in dispatch-sim-fx, 125 in dispatch-service)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR), Location (haversine), Patient, Assignment (entity, with
 AssignmentRole PRIMARY/SUPPORT) / AssignmentStatus (ASSIGNED, EN_ROUTE, ARRIVED, DONE, CANCELLED, TIMED_OUT, FAILED).
@@ -279,7 +279,9 @@ written out (plugins are not managed by the BOM) and the repackage goal.
   as parameters, each built once. Constants ACK_TIMEOUT 60 s, SIGNAL_TIMEOUT 30 s, STALL_TIMEOUT 120 s,
   MAX_READING_AGE 10 min, SEARCH_RADIUS_KM 20. Swap the port beans here for the Postgres adapters.
 - DispatchService (@Service): the single front door; every public method is synchronized on it (one global lock,
-  reads included; ponytail comment: revisit with Postgres). registerPatient / registerUnit (ISE if the id exists),
+  reads included) AND runs its body in tx.execute / tx.executeWithoutResult (TransactionTemplate): lock, BEGIN, work,
+  COMMIT, unlock (see "Database adapters" for why not @Transactional; ponytail: global lock, drop it + optimistic
+  locking for several instances). registerPatient / registerUnit (ISE if the id exists),
   submitReading -> ReadingResult(outcome, CaseInfo or null), acceptTrip (onEnRoute), reportPosition, arrive
   (onArrived), completeTrip (complete; PRIMARY also onStabilised + close), backInService, findCase, openCaseOf,
   findUnit, findTrip, activeTripOf. @Scheduled(fixedDelay = 1000) tick(): dispatchAll (dispatchNext until empty, then
@@ -296,9 +298,9 @@ written out (plugins are not managed by the BOM) and the repackage goal.
 - snapshot(): synchronized, copies findAll units, findOpen cases and findActive trips into a LiveSnapshot(at, units,
   openCases, activeTrips) (compact constructor takes List.copyOf, so it is truly immutable and safe to hand to the
   feed thread). No I/O inside the lock. DispatchService now also takes the Clock (timestamps the snapshot).
-- Tests: EngineConfigTest (@SpringBootTest: engine built, beans shared), DispatchServiceTest (own
-  AnnotationConfigApplicationContext(EngineConfig, DispatchService) per test, so no scheduling and tick() is called
-  by hand: full happy path, duplicate ids, unknown ids, arrive before accept, 50 threads + a ticking thread ->
+- Tests: EngineConfigTest (@SpringBootTest: engine built, beans shared), DispatchServiceTest (since 3d:
+  @SpringBootTest + @Import(TestDatabaseConfig) on the app database, TestDatabase.resetApp() before each test; the
+  background loop also ticks, tests still call tick() by hand, same lock so either dispatches: full happy path, duplicate ids, unknown ids, arrive before accept, 50 threads + a ticking thread ->
   exactly 10 units busy and 10 cases RESPONDING, aRepeatedStepIsHarmless, goingBackwardsIsStillRefused,
   aSnapshotShowsTheFleetTheOpenCasesAndTheTrips).
 
@@ -349,7 +351,7 @@ everyone's update.
 
 ## Database schema (DONE, tested)
 - docker-compose.yml (root): one service `db`, image timescale/timescaledb-ha:pg17 (Postgres 17 + PostGIS +
-  TimescaleDB), db/user/password all `medidispatch` (ponytail: plain-text dev password), port 5432, named volume
+  TimescaleDB), db/user/password all `medidispatch` (ponytail: plain-text dev password), laptop port 5433 (a Windows Postgres service owns 5432 here; container port 5432), named volume
   dbdata mounted at /home/postgres/pgdata/data (this image's data dir, NOT /var/lib/postgresql/data).
 - dispatch-service/src/main/resources/db/migration/V1__init.sql (Flyway; never edit after it has run, add V2...).
   Conventions: text ids; enums as text + CHECK; geography(Point, 4326), LONGITUDE FIRST (ST_Point(lon, lat, 4326)),
@@ -378,11 +380,11 @@ everyone's update.
   the 2 km unit not the 20 km one, ST_Distance about 2000 m. Harmless Flyway warning: extension "timescaledb" already
   exists (this image pre-creates it).
 
-## Database adapters (IN PROGRESS: 3a, 3b, 3c done, 3d to go), package com.medidispatch.service.persistence
+## Database adapters (DONE: the engine runs on Postgres), package com.medidispatch.service.persistence
 Pieces (re-ordered because the JPA starter makes Boot connect to the database at startup): 3a (DONE) patients, units,
 claimer on JDBC. 3b (DONE) the app connects + migrates at startup, trips on JPA. 3c (DONE): cases, queue (FOR UPDATE
-SKIP LOCKED), vitals on JDBC (F). Every port now has a database adapter (EventPublisher stays in memory by decision). 3d: EngineConfig switches to the adapters, each DispatchService call one transaction
-INSIDE the lock (L). Until 3d the ENGINE still runs in memory; the database is only connected and migrated.
+SKIP LOCKED), vitals on JDBC (F). Every port now has a database adapter (EventPublisher stays in memory by decision).
+3d (DONE): EngineConfig builds the adapters, each DispatchService call one transaction INSIDE the lock (L).
 Decisions: JdbcClient + hand-written SQL for the engine's ports; JPA (separate TripEntity + mapper, Spring Data
 method-name queries, saveAndFlush so SQL runs at save() like JDBC, ddl-auto=validate because Flyway owns the schema)
 only for AssignmentRepository and later users/roles; static restore(...) in core; service always on Postgres (in-memory
@@ -469,10 +471,33 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   race: worker A polls on a SingleConnectionDataSource with auto-commit off (holds "first"), worker B polls at once and
   gets "second" without waiting; @Timeout(10, SEPARATE_THREAD) because a blocked JDBC call is not interruptible),
   JdbcVitalsRepositoryTest (8: mirrored + nulls stay null, a repeat ignored, every reading kept).
+- 3d, the switch-over: EngineConfig's port beans are new JdbcXxx(jdbc) / new JpaAssignmentRepository(trips) (JdbcClient
+  from Boot, TripJpaRepository from Spring Data, as @Bean parameters); EventPublisher stays InMemoryEventPublisher
+  (ponytail: an event recorded in a transaction that rolls back stays as a "ghost"; outbox later). DispatchService takes
+  a TransactionTemplate (Boot's bean, over JpaTransactionManager, which covers JDBC too). tick(): while (dispatchOne())
+  with each dispatched case its own transaction (dispatchNext + onAssigned; Boolean.TRUE.equals(tx.execute(...)) because
+  execute may return null), then one transaction for checkTimeouts and one for checkTrips: a failing case rolls back
+  alone and is retried next tick. Reads (findX, snapshot) are transactions too (one consistent picture).
+- Precision (found by ApiTest in 3d): Instant.now() on Windows has 100 ns, Postgres keeps microseconds and ROUNDS, so
+  a resent reading looked older than the stored copy (OUT_OF_ORDER instead of DUPLICATE). Fixed twice: VitalsReading
+  (core) truncates timeStamp to MICROS in its compact constructor (VitalsReadingTest.theTimeIsKeptToTheMicrosecond),
+  and DbTime.toDb truncates every Instant to MICROS (never stored later than the moment it describes).
+- Test databases (3d): TestDatabase's container holds TWO databases, both migrated at start: `test` (adapter tests;
+  reset()) and `app` (CREATE DATABASE app; whole-application tests; resetApp()). Why: Spring keeps started test contexts
+  alive for the whole run and their scheduled dispatch loop keeps ticking; on `test` it would poll the queue tests'
+  cases. TestDatabaseConfig points at app (appUrlStarted()); JpaAssignmentRepositoryTest points at test with its own
+  @DynamicPropertySource. TestDatabase is public, with public resetApp(), appUrlStarted(), username(), password().
+- RestartTest: deliberately not a Spring test (the test framework caches contexts). SpringApplicationBuilder(
+  DispatchServiceApplication).web(NONE).run("--spring.datasource.url=..." ...): settings as command-line args, because
+  .properties(...) sets DEFAULT properties (lowest priority) and application.properties would win. First app: patient,
+  unit, critical reading, tick, accept; closed; second app: case RESPONDING, trip EN_ROUTE, unit ASSIGNED, then arrive
+  and complete work (case CLOSED, unit AVAILABLE).
+- Checked by hand (Nov 22): docker compose up -d, java -jar dispatch-service/target/dispatch-service-1.0-SNAPSHOT.jar,
+  POST patient/unit/critical reading, the loop dispatched, app killed, restarted ("Schema is up to date"): unit ASSIGNED,
+  same trip, case RESPONDING. Packaging the jar needed one online Maven run (maven-jar-plugin deps).
 
 ## Next steps
-Follow PLAN.md section 10 (week 1, Nov 19-25). Next piece: adapters 3d (L): EngineConfig builds the Jdbc/Jpa adapters,
-each DispatchService call one transaction INSIDE the lock (TransactionTemplate), the whole Spring suite on Postgres
-(DispatchServiceTest will need the database too). Then tick PLAN's adapters box. Then hospitals, the simulator over
-HTTP.
+Follow PLAN.md section 10 (week 1, Nov 19-25). Database work is done (engine on Postgres, PLAN box ticked). Next piece:
+hospitals: domain, registry, destination choice, second trip leg, pre-alert data (L). Then the simulator drives the
+service over HTTP (F).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

@@ -12,8 +12,8 @@ services:
       # ponytail: plain-text password, fine for a laptop-only dev database; use secrets in any real deployment.
       POSTGRES_PASSWORD: medidispatch
     ports:
-      # laptop port : container port
-      - "5432:5432"
+      # laptop port : container port. 5433 on the laptop, because a Windows Postgres service may already own 5432.
+      - "5433:5432"
     volumes:
       # A named volume survives "docker compose down". This image keeps its data here, NOT in
       # /var/lib/postgresql/data like the plain postgres image; the wrong path silently loses data.

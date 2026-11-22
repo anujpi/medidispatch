@@ -12,14 +12,7 @@ import com.medidispatch.core.engine.TimeoutMonitor;
 import com.medidispatch.core.engine.TripMonitor;
 import com.medidispatch.core.engine.UnitTracker;
 import com.medidispatch.core.engine.VitalsProcessor;
-import com.medidispatch.core.memory.InMemoryAssignmentRepository;
-import com.medidispatch.core.memory.InMemoryCaseQueue;
-import com.medidispatch.core.memory.InMemoryCaseRepository;
 import com.medidispatch.core.memory.InMemoryEventPublisher;
-import com.medidispatch.core.memory.InMemoryPatientRepository;
-import com.medidispatch.core.memory.InMemoryResourceClaimer;
-import com.medidispatch.core.memory.InMemoryResourceRepository;
-import com.medidispatch.core.memory.InMemoryVitalsRepository;
 import com.medidispatch.core.port.AssignmentRepository;
 import com.medidispatch.core.port.CaseQueue;
 import com.medidispatch.core.port.CaseRepository;
@@ -32,8 +25,17 @@ import com.medidispatch.core.response.LadderResponseDecider;
 import com.medidispatch.core.response.ResponseDecider;
 import com.medidispatch.core.scoring.RiskScorer;
 import com.medidispatch.core.scoring.SimpleScorer;
+import com.medidispatch.service.persistence.JdbcCaseQueue;
+import com.medidispatch.service.persistence.JdbcCaseRepository;
+import com.medidispatch.service.persistence.JdbcPatientRepository;
+import com.medidispatch.service.persistence.JdbcResourceClaimer;
+import com.medidispatch.service.persistence.JdbcResourceRepository;
+import com.medidispatch.service.persistence.JdbcVitalsRepository;
+import com.medidispatch.service.persistence.JpaAssignmentRepository;
+import com.medidispatch.service.persistence.TripJpaRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -46,8 +48,9 @@ import java.time.Duration;
  * once, keeps the result (a "bean"), and passes it to any other {@code @Bean} method or constructor that asks for
  * that type as a parameter. That is how the parts get wired together, and why every part exists exactly once.
  *
- * <p>This is the only class that knows which adapters are used. Swapping the in-memory repositories for Postgres
- * ones later means changing the port beans here and nothing else.
+ * <p>This is the only class that knows which adapters are used: the port beans below are the Postgres adapters
+ * (the in-memory ones in dispatch-core stay for core tests and the simulator). Swapping them was a change to those
+ * beans and nothing else.
  */
 @Configuration
 public class EngineConfig {
@@ -74,56 +77,83 @@ public class EngineConfig {
         return Clock.systemUTC();
     }
 
-    // ---- Ports: storage, queue, claims and events.
-    // ponytail: in-memory adapters lose everything on restart; the Postgres adapters in week 1 replace these beans.
+    // ---- Ports: storage, queue, claims and events. The Postgres adapters (package service.persistence): JDBC for
+    // everything except trips, which use JPA. JdbcClient and TripJpaRepository are created by Boot / Spring Data;
+    // asking for them as parameters is all the wiring needed. The engine parts below only ever see the port types.
 
-    /** @return where cases are stored */
+    /**
+     * @param jdbc Boot's JdbcClient over the application's connection pool
+     * @return where cases are stored
+     */
     @Bean
-    CaseRepository caseRepository() {
-        return new InMemoryCaseRepository();
-    }
-
-    /** @return where patients are stored */
-    @Bean
-    PatientRepository patientRepository() {
-        return new InMemoryPatientRepository();
-    }
-
-    /** @return where units are stored */
-    @Bean
-    ResourceRepository resourceRepository() {
-        return new InMemoryResourceRepository();
-    }
-
-    /** @return where trips (assignments) are stored */
-    @Bean
-    AssignmentRepository assignmentRepository() {
-        return new InMemoryAssignmentRepository();
-    }
-
-    /** @return where vitals readings are stored (in memory: only the latest per patient) */
-    @Bean
-    VitalsRepository vitalsRepository() {
-        return new InMemoryVitalsRepository();
-    }
-
-    /** @return the queue of cases waiting for a unit, most urgent first */
-    @Bean
-    CaseQueue caseQueue() {
-        return new InMemoryCaseQueue();
+    CaseRepository caseRepository(JdbcClient jdbc) {
+        return new JdbcCaseRepository(jdbc);
     }
 
     /**
-     * Must be a single shared object: it is what stops two dispatches from claiming the same unit.
+     * @param jdbc Boot's JdbcClient over the application's connection pool
+     * @return where patients are stored
+     */
+    @Bean
+    PatientRepository patientRepository(JdbcClient jdbc) {
+        return new JdbcPatientRepository(jdbc);
+    }
+
+    /**
+     * @param jdbc Boot's JdbcClient over the application's connection pool
+     * @return where units are stored, with the "units near X" searches
+     */
+    @Bean
+    ResourceRepository resourceRepository(JdbcClient jdbc) {
+        return new JdbcResourceRepository(jdbc);
+    }
+
+    /**
+     * @param trips the Spring Data repository Spring builds from TripJpaRepository
+     * @return where trips (assignments) are stored, through JPA
+     */
+    @Bean
+    AssignmentRepository assignmentRepository(TripJpaRepository trips) {
+        return new JpaAssignmentRepository(trips);
+    }
+
+    /**
+     * @param jdbc Boot's JdbcClient over the application's connection pool
+     * @return where vitals readings are stored (every reading, in the TimescaleDB hypertable)
+     */
+    @Bean
+    VitalsRepository vitalsRepository(JdbcClient jdbc) {
+        return new JdbcVitalsRepository(jdbc);
+    }
+
+    /**
+     * @param jdbc Boot's JdbcClient over the application's connection pool
+     * @return the queue of cases waiting for a unit, most urgent first (a flag on the case rows)
+     */
+    @Bean
+    CaseQueue caseQueue(JdbcClient jdbc) {
+        return new JdbcCaseQueue(jdbc);
+    }
+
+    /**
+     * What stops two dispatches from claiming the same unit: one conditional UPDATE, refereed by Postgres' row lock,
+     * so it holds even across several copies of the service.
      *
+     * @param jdbc Boot's JdbcClient over the application's connection pool
      * @return the record of which unit is claimed by which case
      */
     @Bean
-    ResourceClaimer resourceClaimer() {
-        return new InMemoryResourceClaimer();
+    ResourceClaimer resourceClaimer(JdbcClient jdbc) {
+        return new JdbcResourceClaimer(jdbc);
     }
 
-    /** @return where the engine announces what happened (later read by the live feed) */
+    /**
+     * Stays in memory: nothing outside the process listens to the engine's events yet.
+     *
+     * @return where the engine announces what happened
+     */
+    // ponytail: an event recorded inside a transaction that then rolls back stays here as a "ghost". Nothing reads
+    // these yet; the outbox table (events written in the same transaction) fixes it when something does.
     @Bean
     EventPublisher eventPublisher() {
         return new InMemoryEventPublisher();

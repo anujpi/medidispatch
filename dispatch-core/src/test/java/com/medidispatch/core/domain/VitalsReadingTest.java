@@ -120,4 +120,17 @@ public class VitalsReadingTest {
         assertThrows(IllegalArgumentException.class, () ->
                 new VitalsReading("p1", Instant.now(), 80, 96, 120, 80, 16, 36.8, null));
     }
+
+    /**
+     * The time is kept to the microsecond (what Postgres stores): 100 ns digits are dropped, not rounded, so a
+     * resent reading compares equal to the stored one (DUPLICATE, not OUT_OF_ORDER).
+     */
+    @Test
+    void theTimeIsKeptToTheMicrosecond() {
+        Instant withNanos = Instant.parse("2026-11-22T12:00:00.1234567Z");
+
+        VitalsReading r = new VitalsReading("p1", withNanos, 80, 96, 120, 80, 16, 36.8, Consciousness.ALERT);
+
+        assertEquals(Instant.parse("2026-11-22T12:00:00.123456Z"), r.timeStamp());
+    }
 }

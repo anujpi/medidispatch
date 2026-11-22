@@ -5,13 +5,15 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Converts between the engine's {@link Instant} and Postgres {@code timestamptz}.
  *
  * <p>The Postgres driver reads and writes {@code timestamptz} as {@link OffsetDateTime}, not {@code Instant}, so
  * every adapter goes through here. {@code null} stays {@code null} ("never" in the domain). Postgres keeps
- * microseconds; anything finer in an {@code Instant} is dropped on the way in.
+ * microseconds and would ROUND anything finer (possibly up, into the future); this truncates to the microsecond
+ * first, so a stored time is never later than the moment it describes.
  */
 final class DbTime {
 
@@ -26,7 +28,7 @@ final class DbTime {
         if (instant == null) {
             return null;
         }
-        return instant.atOffset(ZoneOffset.UTC);
+        return instant.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
     }
 
     /**

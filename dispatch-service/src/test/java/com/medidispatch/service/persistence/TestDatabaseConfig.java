@@ -5,8 +5,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
 
 /**
- * Points a Spring test at the shared test database ({@link TestDatabase}): add {@code @Import(TestDatabaseConfig.class)}
- * to any test that starts Spring with a database.
+ * Points a test that starts the WHOLE application at the {@code app} database of the shared test container
+ * ({@link TestDatabase}): add {@code @Import(TestDatabaseConfig.class)} to every such test. (Adapter tests use the
+ * {@code test} database instead; see JpaAssignmentRepositoryTest.)
  *
  * <p>The container's port is random, so the address can only be known at runtime. A {@link DynamicPropertyRegistrar}
  * bean (Spring 6.2+) supplies such values; they override {@code spring.datasource.*} from application.properties.
@@ -22,12 +23,12 @@ import org.springframework.test.context.DynamicPropertyRegistrar;
 public class TestDatabaseConfig {
 
     /**
-     * @return the registrar that sets the DataSource URL, user and password to the test container's
+     * @return the registrar that sets the DataSource URL, user and password to the {@code app} database's
      */
     @Bean
     DynamicPropertyRegistrar testDatabaseProperties() {
         return registry -> {
-            registry.add("spring.datasource.url", () -> TestDatabase.url());
+            registry.add("spring.datasource.url", () -> TestDatabase.appUrlStarted());
             registry.add("spring.datasource.username", () -> TestDatabase.username());
             registry.add("spring.datasource.password", () -> TestDatabase.password());
         };

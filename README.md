@@ -254,7 +254,9 @@ Trips use JPA (Hibernate with Spring Data), next to plain SQL for the rest: trip
 
 Cases, the dispatch queue and vitals have their database adapters too, so every part the engine stores now has one. The queue is a flag on the case itself, and taking the most urgent case is a single statement that also locks it, with `FOR UPDATE SKIP LOCKED`: a second worker asking at the same moment gets the next case at once instead of waiting or getting the same one, which a test shows with two connections. Every vitals reading is kept (the history is what a future model would learn from); a missing measurement stays missing rather than turning into 0.
 
-Next: switching the engine over to the database, with each request as one all-or-nothing transaction. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**The engine now runs on Postgres.** The service plugs the database adapters into the same engine (the change was one configuration class), and every request is one all-or-nothing transaction: dispatching a case (take it off the queue, claim the unit, create the trip, mark the case responding) either happens completely or not at all, so a crash halfway can never leave an ambulance claimed with no trip. The transaction is opened and committed inside the service's lock, so the next request always sees the previous one's committed result. A test stops the whole application in the middle of a trip and starts a new one: the trip, the unit and the case are all still there, and the crew can finish the job.
+
+Next: hospitals (where the patient goes after the scene), then the simulator driving the running service over HTTP. Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -293,7 +295,7 @@ Next: switching the engine over to the database, with each request as one all-or
 - [x] Database adapters for patients, units (nearby search) and claims
 - [x] Trips on JPA; the service connects to the database and migrates it at startup
 - [x] Database adapters for cases, the dispatch queue and vitals
-- [ ] The engine running on Postgres (one transaction per request)
+- [x] The engine running on Postgres (one transaction per request); a trip survives a restart
 - [ ] Hospitals: registry, destination choice, pre-alert
 - [ ] The simulator driving the running service over HTTP
 - [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
@@ -326,7 +328,7 @@ To watch the live feed, keep this running in a terminal (`-N` prints data as it 
 curl -N localhost:8080/api/live
 ```
 
-A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). Start it before the service: the service connects at startup (on a server, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` instead). The engine still keeps its state in memory for now, so a restart starts empty. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
+A local database (Postgres with PostGIS and TimescaleDB) starts with `docker compose up -d` (port 5433 on your machine, so it does not clash with a locally installed Postgres on 5432; database, user and password are all `medidispatch`; `docker compose down -v` wipes it). Start it before the service: the service connects at startup and Flyway brings the schema up to date (on a server, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` instead). Everything is stored there, so the service can be restarted without losing anything. The quickest way to see it work is the live simulator window: run `SimulatorLauncher` in `dispatch-sim-fx` (in IntelliJ, press the run button next to `main`, or `mvn javafx:run` inside `dispatch-sim-fx` after `mvn install` at the root). Run `SimulatorLauncher`, not `SimulatorApp`: starting JavaFX through a plain `main` avoids the "JavaFX runtime components are missing" check.
 
 For the numbers only, run `SimulatorMain` in `dispatch-sim` (pass a number as the program argument to use another seed). It prints a report like this:
 
@@ -432,9 +434,10 @@ Every component is covered by tests, including:
 - database schema tests on a real Postgres in Docker (Testcontainers): two connections race to claim one ambulance and the second waits on the row lock, then loses; the database refuses a second open case, a second active trip, an unknown status and a duplicate reading; a unit 2 km away is found within 5 km and one 20 km away is not,
 - database adapter tests on the same real database: every field survives the round trip, saving a unit never undoes its claim, 20 threads race for one ambulance and exactly one wins, and the database search gives the same units in the same order as the in-memory one for a random fleet of 60,
 - JPA tests for trips (a Spring "slice" that starts only the database layer, each test rolled back): every lookup the engine uses, and a second active trip for one ambulance refused by the database at the moment it is saved,
-- queue, case and vitals adapter tests: the same ordering as the in-memory queue, a case that was never saved cannot be queued, saving a case never takes it out of the queue, two workers taking cases at the same moment get different ones without waiting, a second open case for one patient is refused, and missing measurements come back as missing.
+- queue, case and vitals adapter tests: the same ordering as the in-memory queue, a case that was never saved cannot be queued, saving a case never takes it out of the queue, two workers taking cases at the same moment get different ones without waiting, a second open case for one patient is refused, and missing measurements come back as missing,
+- the whole service test suite running on Postgres, including 50 threads hitting the service while the dispatch loop runs (each unit sent exactly once), and a restart test that stops the application in the middle of a trip, starts a new one and finishes the trip.
 
-Planned: the whole service test suite running on Postgres, and simulator-driven load tests.
+Planned: simulator-driven load tests.
 
 ## Safety, privacy and fairness
 

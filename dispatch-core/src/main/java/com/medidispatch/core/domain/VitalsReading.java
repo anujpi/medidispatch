@@ -1,6 +1,7 @@
 package com.medidispatch.core.domain;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 /**
  * One set of vital signs for a patient, taken at a single moment.
@@ -10,7 +11,7 @@ import java.time.Instant;
  * are present are range-checked, so an impossible reading never enters the engine.
  *
  * @param patientId     the patient the reading belongs to; never blank
- * @param timeStamp     when the reading was taken
+ * @param timeStamp     when the reading was taken; kept to the microsecond (finer digits are dropped)
  * @param heartRate     beats per minute, 0 to 300
  * @param spo2          blood oxygen saturation in percent, 0 to 100
  * @param systolicBp    systolic blood pressure in mmHg, 30 to 300
@@ -60,6 +61,10 @@ public record VitalsReading(String patientId,
        if(patientId == null || timeStamp == null || consciousness == null){
            throw new IllegalArgumentException("PatientId,TimeStamp,Consciousness cant be null");
        }
+       // Kept to the microsecond, the precision Postgres stores. Finer digits (Instant.now() on Windows has 100 ns)
+       // would be ROUNDED by the database, so a resent reading could look slightly older than the stored copy
+       // (OUT_OF_ORDER instead of DUPLICATE). Below a microsecond is noise for a vital sign anyway.
+       timeStamp = timeStamp.truncatedTo(ChronoUnit.MICROS);
        if(respRate != null && (respRate < 0 || respRate > 45)){
            throw new IllegalArgumentException("RespRate must be 0 - 45, got" + respRate);
        }

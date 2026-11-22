@@ -10,10 +10,13 @@ import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.core.engine.ProcessingResult;
-import org.junit.jupiter.api.AfterEach;
+import com.medidispatch.service.persistence.TestDatabase;
+import com.medidispatch.service.persistence.TestDatabaseConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -26,30 +29,28 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests {@link DispatchService} against the real engine.
+ * Tests {@link DispatchService} against the real engine on the real database: the whole application, on the
+ * {@code app} database of the shared test container ({@link TestDatabaseConfig}).
  *
- * <p>Each test builds a small Spring context with only {@link EngineConfig} and {@link DispatchService}, so every
- * test starts from an empty engine. Scheduling is not switched on here, so {@link DispatchService#tick()} runs
- * only when a test calls it: the test decides exactly when units are sent.
+ * <p>The tables are emptied before each test, so every test starts from an empty city. The scheduled dispatch loop
+ * runs in the background too; tests still call {@link DispatchService#tick()} themselves to dispatch right now. Both
+ * take the same lock, so whichever runs first sends the unit and the assertions hold either way.
  */
+@SpringBootTest
+@Import(TestDatabaseConfig.class)
 class DispatchServiceTest {
 
     // Two points in central Delhi, under 1 km apart.
     private static final Location HOME = new Location(28.6139, 77.2090);
     private static final Location NEARBY = new Location(28.6200, 77.2150);
 
-    private AnnotationConfigApplicationContext context;
+    @Autowired
     private DispatchService service;
 
+    /** Every test starts from empty tables. */
     @BeforeEach
-    void setUp() {
-        context = new AnnotationConfigApplicationContext(EngineConfig.class, DispatchService.class);
-        service = context.getBean(DispatchService.class);
-    }
-
-    @AfterEach
-    void tearDown() {
-        context.close();
+    void emptyTables() {
+        TestDatabase.resetApp();
     }
 
     // Every vital far out of range: the scorer rates this CRITICAL.
