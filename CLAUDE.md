@@ -42,8 +42,8 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (961 tests: 610 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 174 in dispatch-service,
-67 in dispatch-routing)
+## Built so far (986 tests: 624 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 178 in dispatch-service,
+74 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -579,6 +579,7 @@ CaseManager, AssignmentManager, UnitAssigner, UnitTracker), which is what makes 
   repeated transport, no hospital = nothing changes, snapshot facilities); ApiTest +3 (facilities over HTTP, bad
   facility requests 400, Kolkata transport over HTTP with a based ambulance).
 - H3c (hospital views): DispatchService.TRANSPORT_SPEED_KMH = 40 (public; ponytail: straight line, no roads).
+  [R4b replaced it: the ETA now comes from TravelTime, see Routing R4.]
   DispatchService also takes VitalsRepository (constructor: ..., facilities, transport, vitals, clock, tx).
   fleetOf(id): units whose baseId is the facility, sorted by id (filters resources.findAll() in Java; ponytail:
   findByBaseId + index at thousands). inboundTo(id): active trips that are TRANSPORTING with this hospitalId; per
@@ -710,7 +711,7 @@ Clarified with the user: the backend service is the REAL application's core; the
 map.html are dev/demo tools; the real front end (React control room, crew PWA, hospital panel, patient app) is
 still to be built.
 
-## Routing (R1, R2, R3 DONE; R4 next), module dispatch-routing, package com.medidispatch.routing
+## Routing (R1, R2, R3, R4 DONE; R5 next), module dispatch-routing, package com.medidispatch.routing
 Why: everything moves and is measured in straight lines today (units fly over lakes; dispatch picks the nearest as
 the crow flies; ETA = straight line at 40 km/h). Decided: write our own graph and algorithms (not OSRM/GraphHopper)
 for the learning and portfolio value; traffic = a MODEL (road-class speeds, rush-hour factors, simulated incidents,
@@ -796,9 +797,36 @@ routes and the map draws them.
   boost, top speed, frozen picture ignores later incidents, UTC -> Bangalore), TrafficRoutingTest 4 (night main road
   vs rush-hour lane, closure detour, only road closed -> no route, A* = Dijkstra with random incidents/times/both
   profiles). RouterPropertyTest.randomGrid is package-visible for reuse.
-- R4 next: a TravelTime port in core (straight line stays the default, core unchanged); the service loads
-  data/bangalore.graph with the traffic model; dispatch ranks the closest few candidates by drive time; hospital
-  choice and pre-alert ETA by drive time; the live feed carries each unit's route for R5's map.
+- R4a (core): port TravelTime.seconds(from, to, emergency) -> OptionalDouble (empty = no way there).
+  engine/StraightLineTravelTime: SPEED_KMH 40, km / 40 x 3600, siren ignored; the default everywhere (old
+  constructors kept, so the simulator and older tests are unchanged). Dispatcher(..., TravelTime):
+  RANKED_BY_TRAVEL_TIME 5; fastestFirst(nearestFirst, patient) (package-private) re-ranks the first 5 of the ring
+  search by seconds with the siren on (unreachable = infinity, so tried last), ties keep their distance order, the
+  rest appended in distance order. SupportDispatcher(..., TravelTime): "is the responder sooner" compares secondsTo vs
+  primarySeconds; the ring search is still capped at the primary's straight-line km (ponytail: a responder a bit
+  farther in km but quicker by road is not looked at). DestinationChooser(facilities, travel): "nearest" = soonest by
+  TravelTime with the siren on, unreachable hospitals skipped, ties by id. ponytail: the Preemptor still compares
+  straight-line km.
+  Tests: FixedTravelTime helper (from/to/unreachable/unreachableTo); StraightLineTravelTimeTest 3; DispatcherTest +3
+  (unreachable tried last, only the nearest five ranked + ties keep order, missing TravelTime refused);
+  DestinationChooserTest +3 (farther but quicker by road wins, unreachable skipped, missing args); SupportDispatcherTest
+  +1 and a few changed.
+- R4b (routing + service): RoadTravelTime implements TravelTime: snap both points (NearestNode), freeze the traffic
+  at clock.instant() (TrafficModel.at), A*, add the straight legs to/from the road at SNAP_LEG 20 km/h; empty when
+  A* finds no route (closure). load(path, traffic, clock); graph(). EngineConfig: trafficModel bean
+  (bangaloreWeekday); travelTime(@Value medidispatch.routing.graph-file, default data/bangalore.graph in
+  application.properties): RoadTravelTime if the file is found (findGraph also tries one folder up, for IntelliJ
+  starting inside dispatch-service/), else StraightLineTravelTime with a warning; log "Road routing on: <path>
+  (<n> nodes, <m> edges)". Dispatcher, SupportDispatcher and DestinationChooser beans take it. DispatchService takes
+  TravelTime (constructor: ..., vitals, travel, clock, tx); pre-alert ETA = travel.seconds(unit, hospital, siren),
+  falling back to straight line at 40 km/h when empty; distanceKm stays straight-line. TRANSPORT_SPEED_KMH removed.
+  Service tests run on straight lines: TestDatabaseConfig sets graph-file "", RestartTest passes
+  --medidispatch.routing.graph-file=.
+  Tests: RoadTravelTimeTest 7 (L-shaped road longer than the line, snap legs added, peak = night / 0.4, siren faster,
+  closure -> empty, load() from a file, bad args), RoutingConfigTest 4 (no file -> straight line, file -> roads, blank
+  = off, relative path tried one folder up).
+- R5 next: the simulator drives along routes (units follow the streets), the live feed carries each unit's route,
+  the map draws them; an incidents API so jams and closures can be made while it runs.
 
 ## Live map (M1, DONE)
 - dispatch-service/src/main/resources/static/map.html: served by Spring Boot from static/ (no controller), open

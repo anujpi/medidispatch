@@ -23,7 +23,8 @@ import org.springframework.test.context.DynamicPropertyRegistrar;
 public class TestDatabaseConfig {
 
     /**
-     * @return the registrar that sets the DataSource URL, user and password to the {@code app} database's
+     * @return the registrar that sets the DataSource URL, user and password to the {@code app} database's, and
+     *         turns road routing off (straight lines)
      */
     @Bean
     DynamicPropertyRegistrar testDatabaseProperties() {
@@ -31,6 +32,9 @@ public class TestDatabaseConfig {
             registry.add("spring.datasource.url", () -> TestDatabase.appUrlStarted());
             registry.add("spring.datasource.username", () -> TestDatabase.username());
             registry.add("spring.datasource.password", () -> TestDatabase.password());
+            // routing off: tests run inside dispatch-service/, and one folder up is the real Bangalore graph, while
+            // the test patients live elsewhere; straight lines keep every test's distances and ETAs as written
+            registry.add("medidispatch.routing.graph-file", () -> "");
         };
     }
 }

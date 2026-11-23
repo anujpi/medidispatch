@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -21,11 +22,13 @@ import java.util.Set;
  *   <li>the case's {@link ResponsePlan} asks for support;</li>
  *   <li>the case does not already have an active SUPPORT trip (for example after the ambulance was
  *       replaced), so nobody is sent twice;</li>
- *   <li>the responder is strictly closer to the patient than the primary unit, because one who arrives
- *       after the ambulance only takes a nurse away from other patients.</li>
+ *   <li>the responder gets to the patient strictly sooner than the primary unit ({@link TravelTime}), because one
+ *       who arrives after the ambulance only takes a nurse away from other patients.</li>
  * </ul>
- * Support types are tried in plan order, each with a ring search capped at the primary unit's distance.
+ * Support types are tried in plan order, each with a ring search capped at the primary unit's straight-line
+ * distance. With the straight-line default, "sooner" is exactly "closer".
  */
+// ponytail: a responder farther in a straight line than the ambulance but faster by road is not searched for.
 public class SupportDispatcher {
     private final CaseRepository cases;
     private final PatientRepository patients;
@@ -33,9 +36,10 @@ public class SupportDispatcher {
     private final AssignmentRepository assignments;
     private final ResponseDecider decider;
     private final UnitAssigner assigner;
+    private final TravelTime travel;
 
     /**
-     * Creates the support dispatcher.
+     * Creates the support dispatcher, comparing straight-line travel times (that is, distances).
      *
      * @param cases       where cases are stored
      * @param patients    where the patient's location comes from
@@ -55,6 +59,32 @@ public class SupportDispatcher {
                              ResponseDecider decider,
                              EventPublisher publisher,
                              Clock clock) {
+        this(cases, patients, resources, claimer, assignments, decider, publisher, clock, new StraightLineTravelTime());
+    }
+
+    /**
+     * Creates the support dispatcher.
+     *
+     * @param cases       where cases are stored
+     * @param patients    where the patient's location comes from
+     * @param resources   where units are stored and searched by location
+     * @param claimer     the atomic "this unit is mine" lock
+     * @param assignments where trips are stored
+     * @param decider     decides whether a case wants a first responder, and which kinds
+     * @param publisher   where new assignments are announced
+     * @param clock       source of assignment times
+     * @param travel      how long a unit takes to reach the patient
+     * @throws IllegalArgumentException if any argument is missing
+     */
+    public SupportDispatcher(CaseRepository cases,
+                             PatientRepository patients,
+                             ResourceRepository resources,
+                             ResourceClaimer claimer,
+                             AssignmentRepository assignments,
+                             ResponseDecider decider,
+                             EventPublisher publisher,
+                             Clock clock,
+                             TravelTime travel) {
         if (cases == null || patients == null || resources == null || claimer == null || assignments == null
                 || decider == null || publisher == null || clock == null) {
             throw new IllegalArgumentException(
@@ -66,6 +96,10 @@ public class SupportDispatcher {
         this.assignments = assignments;
         this.decider = decider;
         this.assigner = new UnitAssigner(resources, claimer, assignments, publisher, clock);
+        if (travel == null) {
+            throw new IllegalArgumentException("travel is required");
+        }
+        this.travel = travel;
     }
 
     /**
@@ -104,8 +138,9 @@ public class SupportDispatcher {
                 .orElseThrow(() -> new IllegalStateException("Unit " + primary.resourceId() + " not found"));
         Location where = patient.location();
         double primaryKm = where.distanceKmTo(primaryUnit.location());
+        double primarySeconds = secondsTo(primaryUnit.location(), where);
         for (ResourceType type : plan.supportTypes()) {
-            Optional<Assignment> sent = tryTypeCloserThan(c, where, type, primaryKm);
+            Optional<Assignment> sent = tryTypeCloserThan(c, where, type, primaryKm, primarySeconds);
             if (sent.isPresent()) {
                 return sent;
             }
@@ -114,27 +149,35 @@ public class SupportDispatcher {
     }
 
     // one responder type, ring by ring, but never as far as the primary unit
-    private Optional<Assignment> tryTypeCloserThan(Case c, Location where, ResourceType type, double limitKm) {
+    private Optional<Assignment> tryTypeCloserThan(Case c, Location where, ResourceType type, double limitKm,
+                                                   double limitSeconds) {
         if (limitKm <= 0) {
             return Optional.empty();                          // the primary unit is already at the patient
         }
         double radius = SearchRings.first(limitKm);
-        Optional<Assignment> sent = tryWithin(c, where, type, radius, limitKm);
+        Optional<Assignment> sent = tryWithin(c, where, type, radius, limitSeconds);
         while (sent.isEmpty() && radius < limitKm) {
             radius = SearchRings.next(radius, limitKm);
-            sent = tryWithin(c, where, type, radius, limitKm);
+            sent = tryWithin(c, where, type, radius, limitSeconds);
         }
         return sent;
     }
 
-    // free responders of this type inside the radius and strictly closer than the primary, nearest first
-    private Optional<Assignment> tryWithin(Case c, Location where, ResourceType type, double radiusKm, double limitKm) {
-        List<Resource> closer = new ArrayList<>();
+    // free responders of this type inside the radius that get there strictly sooner than the primary, nearest first
+    private Optional<Assignment> tryWithin(Case c, Location where, ResourceType type, double radiusKm,
+                                           double limitSeconds) {
+        List<Resource> sooner = new ArrayList<>();
         for (Resource r : resources.findAvailableNear(where, radiusKm, Set.of(type))) {
-            if (where.distanceKmTo(r.location()) < limitKm) {
-                closer.add(r);                                // a tie with the primary is not "closer"
+            if (secondsTo(r.location(), where) < limitSeconds) {
+                sooner.add(r);                                // a tie with the primary is not "sooner"
             }
         }
-        return assigner.assignFirst(c, closer, AssignmentRole.SUPPORT);
+        return assigner.assignFirst(c, sooner, AssignmentRole.SUPPORT);
+    }
+
+    // siren on; a place that cannot be reached counts as never
+    private double secondsTo(Location from, Location patient) {
+        OptionalDouble seconds = travel.seconds(from, patient, true);
+        return seconds.isPresent() ? seconds.getAsDouble() : Double.POSITIVE_INFINITY;
     }
 }

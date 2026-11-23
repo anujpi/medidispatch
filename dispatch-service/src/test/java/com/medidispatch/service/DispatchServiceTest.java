@@ -17,6 +17,7 @@ import com.medidispatch.core.domain.RiskBand;
 import com.medidispatch.core.domain.Sex;
 import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.core.engine.ProcessingResult;
+import com.medidispatch.core.engine.StraightLineTravelTime;
 import com.medidispatch.service.persistence.TestDatabase;
 import com.medidispatch.service.persistence.TestDatabaseConfig;
 import org.junit.jupiter.api.BeforeEach;
@@ -403,7 +404,7 @@ class DispatchServiceTest {
 
     /** Minutes the pre-alert should show for an ambulance at {@code from} going to {@code to}. */
     private static long expectedEta(Location from, Location to) {
-        return (long) Math.ceil(from.distanceKmTo(to) / DispatchService.TRANSPORT_SPEED_KMH * 60);
+        return (long) Math.ceil(from.distanceKmTo(to) / StraightLineTravelTime.SPEED_KMH * 60);
     }
 
     /** Only the units based at the facility, sorted by id, whatever they are doing; unknown facility: not found. */

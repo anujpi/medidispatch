@@ -8,6 +8,7 @@ import com.medidispatch.core.engine.Dispatcher;
 import com.medidispatch.core.engine.Preemptor;
 import com.medidispatch.core.engine.ResponseRecovery;
 import com.medidispatch.core.engine.ResponseUpgrader;
+import com.medidispatch.core.engine.StraightLineTravelTime;
 import com.medidispatch.core.engine.SupportDispatcher;
 import com.medidispatch.core.engine.TimeoutMonitor;
 import com.medidispatch.core.engine.TransportCoordinator;
@@ -23,6 +24,7 @@ import com.medidispatch.core.port.FacilityRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceClaimer;
 import com.medidispatch.core.port.ResourceRepository;
+import com.medidispatch.core.port.TravelTime;
 import com.medidispatch.core.port.VitalsRepository;
 import com.medidispatch.core.response.LadderResponseDecider;
 import com.medidispatch.core.response.ResponseDecider;
@@ -36,13 +38,23 @@ import com.medidispatch.service.persistence.JdbcResourceClaimer;
 import com.medidispatch.service.persistence.JdbcResourceRepository;
 import com.medidispatch.service.persistence.JdbcVitalsRepository;
 import com.medidispatch.service.persistence.JpaAssignmentRepository;
+import com.medidispatch.routing.RoadTravelTime;
+import com.medidispatch.routing.TrafficModel;
+import com.medidispatch.routing.TrafficProfile;
 import com.medidispatch.service.persistence.TripJpaRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 
 /**
  * Builds the dispatch engine and hands it to Spring.
@@ -58,6 +70,8 @@ import java.time.Duration;
  */
 @Configuration
 public class EngineConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(EngineConfig.class);
 
     /** How long a crew has to accept a new trip before it is taken back and the unit marked OFFLINE. */
     static final Duration ACK_TIMEOUT = Duration.ofSeconds(60);
@@ -236,14 +250,15 @@ public class EngineConfig {
      * @param decider     which unit types to send
      * @param events      where changes are announced
      * @param clock       the shared clock
-     * @return the part that sends the nearest suitable free unit to the most urgent case
+     * @param travel      travel times (by road when the graph is there)
+     * @return the part that sends the suitable free unit that gets there soonest to the most urgent case
      */
     @Bean
     Dispatcher dispatcher(CaseQueue queue, PatientRepository patients, ResourceRepository resources,
                           ResourceClaimer claimer, AssignmentRepository assignments, ResponseDecider decider,
-                          EventPublisher events, Clock clock) {
+                          EventPublisher events, Clock clock, TravelTime travel) {
         return new Dispatcher(queue, patients, resources, claimer, assignments, decider, events, clock,
-                SEARCH_RADIUS_KM);
+                SEARCH_RADIUS_KM, travel);
     }
 
     /**
@@ -270,14 +285,15 @@ public class EngineConfig {
      * @param decider     which responder types to send
      * @param events      where changes are announced
      * @param clock       the shared clock
-     * @return the part that sends a doctor or nurse alongside the ambulance when one is closer
+     * @param travel      travel times (by road when the graph is there)
+     * @return the part that sends a doctor or nurse alongside the ambulance when one gets there sooner
      */
     @Bean
     SupportDispatcher supportDispatcher(CaseRepository cases, PatientRepository patients,
                                         ResourceRepository resources, ResourceClaimer claimer,
                                         AssignmentRepository assignments, ResponseDecider decider,
-                                        EventPublisher events, Clock clock) {
-        return new SupportDispatcher(cases, patients, resources, claimer, assignments, decider, events, clock);
+                                        EventPublisher events, Clock clock, TravelTime travel) {
+        return new SupportDispatcher(cases, patients, resources, claimer, assignments, decider, events, clock, travel);
     }
 
     /**
@@ -294,17 +310,65 @@ public class EngineConfig {
     }
 
     /**
-     * @param resources unit storage
-     * @param clock     the shared clock
-     * @return the part that records unit positions and puts units back in service
-     */
-    /**
      * @param facilities the hospital and clinic registry
+     * @param travel     travel times (by road when the graph is there)
      * @return the destination rules: which hospital a patient is taken to
      */
     @Bean
-    DestinationChooser destinationChooser(FacilityRepository facilities) {
-        return new DestinationChooser(facilities);
+    DestinationChooser destinationChooser(FacilityRepository facilities, TravelTime travel) {
+        return new DestinationChooser(facilities, travel);
+    }
+
+    /**
+     * @return the traffic on the roads: Bangalore's weekday rush hours; incidents are added while running
+     */
+    @Bean
+    TrafficModel trafficModel() {
+        return new TrafficModel(TrafficProfile.bangaloreWeekday());
+    }
+
+    /**
+     * Real roads if the graph file is there, straight lines if not. One bean serves every "who gets there soonest"
+     * question: the dispatcher, the support dispatcher, the hospital choice and the pre-alert ETA.
+     *
+     * @param graphFile where the road graph is ({@code medidispatch.routing.graph-file}); blank means "off"
+     * @param traffic   rush hours and incidents
+     * @param clock     the shared clock (the traffic is taken at "now")
+     * @return the travel times to use
+     * @throws IOException if the graph file is there but cannot be read
+     */
+    @Bean
+    TravelTime travelTime(@Value("${medidispatch.routing.graph-file:}") String graphFile, TrafficModel traffic,
+                          Clock clock) throws IOException {
+        Optional<Path> file = findGraph(graphFile);
+        if (file.isEmpty()) {
+            log.warn("No road graph at '{}': routing uses straight lines at {} km/h", graphFile,
+                    StraightLineTravelTime.SPEED_KMH);
+            return new StraightLineTravelTime();
+        }
+        RoadTravelTime roads = RoadTravelTime.load(file.get(), traffic, clock);
+        log.info("Road routing on: {} ({} nodes, {} edges)", file.get().toAbsolutePath(),
+                roads.graph().nodeCount(), roads.graph().edgeCount());
+        return roads;
+    }
+
+    /**
+     * @param graphFile the configured path
+     * @return the file as given, else (for a relative path) the same path one folder up, else empty
+     */
+    static Optional<Path> findGraph(String graphFile) {
+        if (graphFile == null || graphFile.isBlank()) {
+            return Optional.empty();
+        }
+        Path given = Path.of(graphFile);
+        if (Files.isRegularFile(given)) {
+            return Optional.of(given);
+        }
+        Path oneUp = Path.of("..").resolve(graphFile);
+        if (!given.isAbsolute() && Files.isRegularFile(oneUp)) {
+            return Optional.of(oneUp);
+        }
+        return Optional.empty();
     }
 
     /**
@@ -322,6 +386,11 @@ public class EngineConfig {
         return new TransportCoordinator(assignments, resources, chooser, assignmentManager, caseManager);
     }
 
+    /**
+     * @param resources unit storage
+     * @param clock     the shared clock
+     * @return the part that records unit positions and puts units back in service
+     */
     @Bean
     UnitTracker unitTracker(ResourceRepository resources, Clock clock) {
         return new UnitTracker(resources, clock);

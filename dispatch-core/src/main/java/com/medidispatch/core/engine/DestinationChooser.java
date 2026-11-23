@@ -4,10 +4,12 @@ import com.medidispatch.core.domain.Capability;
 import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.port.FacilityRepository;
+import com.medidispatch.core.port.TravelTime;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -22,20 +24,37 @@ import java.util.Set;
  *       department;</li>
  *   <li>otherwise the nearest hospital of any kind.</li>
  * </ol>
- * Empty only if no hospital is registered at all. Equal distances are decided by id, so the answer never depends on
- * storage order. A placeholder policy, not clinical guidance.
+ * "Nearest" means reached soonest, with the siren on, by the {@link TravelTime} given (a straight line by default;
+ * real roads with traffic in the service); a hospital that cannot be reached is skipped. Empty only if no hospital is
+ * registered (or reachable). Equal times are decided by id, so the answer never depends on storage order. A
+ * placeholder policy, not clinical guidance.
  */
-// ponytail: straight-line distances (Location.distanceKmTo), not road distances; a routing service later. And it
-// reads every facility, fine for the tens in a city; a spatial query if there are ever thousands.
+// ponytail: it times every hospital (tens in a city, one route each); a spatial pre-filter if there are ever hundreds.
 public class DestinationChooser {
 
     private final FacilityRepository facilities;
+    private final TravelTime travel;
 
     /**
+     * Chooses by straight-line travel time (that is, by distance).
+     *
      * @param facilities the facility registry (hospitals and clinics)
      */
     public DestinationChooser(FacilityRepository facilities) {
+        this(facilities, new StraightLineTravelTime());
+    }
+
+    /**
+     * @param facilities the facility registry (hospitals and clinics)
+     * @param travel     how long the ambulance takes to reach a hospital (siren on)
+     * @throws IllegalArgumentException if either is missing
+     */
+    public DestinationChooser(FacilityRepository facilities, TravelTime travel) {
+        if (facilities == null || travel == null) {
+            throw new IllegalArgumentException("facilities and travel are required");
+        }
         this.facilities = facilities;
+        this.travel = travel;
     }
 
     /**
@@ -96,17 +115,22 @@ public class DestinationChooser {
     }
 
     /**
-     * @return the candidate closest to {@code from} (lower id on a tie), or empty if there are no candidates
+     * @return the candidate reached soonest from {@code from} with the siren on (lower id on a tie), or empty if
+     *         there is none; a hospital that cannot be reached by road is skipped
      */
-    private static Optional<Facility> nearest(List<Facility> candidates, Location from) {
+    private Optional<Facility> nearest(List<Facility> candidates, Location from) {
         Facility best = null;
-        double bestKm = Double.MAX_VALUE;
+        double bestSeconds = Double.MAX_VALUE;
         for (Facility h : candidates) {
-            double km = from.distanceKmTo(h.location());
-            // On the first pass best is null, but km < MAX_VALUE is already true, so best.id() is never reached.
-            if (km < bestKm || (km == bestKm && h.id().compareTo(best.id()) < 0)) {
+            OptionalDouble seconds = travel.seconds(from, h.location(), true);
+            if (seconds.isEmpty()) {
+                continue;
+            }
+            double s = seconds.getAsDouble();
+            // On the first pass best is null, but s < MAX_VALUE is already true, so best.id() is never reached.
+            if (s < bestSeconds || (s == bestSeconds && h.id().compareTo(best.id()) < 0)) {
                 best = h;
-                bestKm = km;
+                bestSeconds = s;
             }
         }
         return Optional.ofNullable(best);

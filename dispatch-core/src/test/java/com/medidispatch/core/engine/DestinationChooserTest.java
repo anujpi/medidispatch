@@ -159,4 +159,32 @@ public class DestinationChooserTest {
     private static Location kmNorth(double km) {
         return new Location(PATIENT.latitude() + km * 0.009, PATIENT.longitude());
     }
+
+    // ---- travel time (R4) ----
+
+    /** Two stroke units: the nearer one is stuck behind traffic, the farther one is quicker by road. */
+    @Test
+    void aFartherCapableHospitalThatIsQuickerByRoadWins() {
+        add("near-stroke", 3, STROKE, true);
+        add("far-stroke", 9, STROKE, true);
+        FixedTravelTime roads = new FixedTravelTime().to(kmNorth(3), 1_500).to(kmNorth(9), 700);
+
+        assertEquals("far-stroke", new DestinationChooser(registry, roads).choose(PATIENT, STROKE).orElseThrow().id());
+    }
+
+    /** The only stroke unit cannot be reached (a closure): it is skipped and the rules go on to an open hospital. */
+    @Test
+    void aHospitalThatCannotBeReachedIsSkipped() {
+        add("stroke-cut-off", 4, STROKE, true);
+        add("general", 6, NOTHING_SPECIAL, true);
+        FixedTravelTime roads = new FixedTravelTime().unreachableTo(kmNorth(4));
+
+        assertEquals("general", new DestinationChooser(registry, roads).choose(PATIENT, STROKE).orElseThrow().id());
+    }
+
+    @Test
+    void missingArgumentsAreRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new DestinationChooser(null, new StraightLineTravelTime()));
+        assertThrows(IllegalArgumentException.class, () -> new DestinationChooser(registry, null));
+    }
 }

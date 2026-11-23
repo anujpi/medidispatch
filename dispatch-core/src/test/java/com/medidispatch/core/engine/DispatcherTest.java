@@ -445,4 +445,82 @@ public class DispatcherTest {
         assertEquals(1, queue.size());                                // not lost
         assertEquals(ResourceStatus.AVAILABLE, resources.findById("als-near").get().status());
     }
+
+    // ---------- travel time: nearest is not always soonest there (R4) ----------
+
+    // both inside the first 2-km ring, so the ring search returns them together, nearest first
+    private static final Location NEAR_ACROSS_THE_LAKE = new Location(0.010, 0);   // about 1.1 km
+    private static final Location FARTHER_ON_THE_ROAD = new Location(0.015, 0);    // about 1.7 km
+
+    private Dispatcher dispatcherWith(FixedTravelTime travel) {
+        return new Dispatcher(queue, patients, resources, claimer, assignments, new LadderResponseDecider(), events,
+                clock, 20.0, travel);
+    }
+
+    @Test
+    void theUnitThatGetsThereSoonestIsSentEvenIfItIsFarther() {
+        addResource("als-lake", ResourceType.AMBULANCE_ALS, NEAR_ACROSS_THE_LAKE);
+        addResource("als-road", ResourceType.AMBULANCE_ALS, FARTHER_ON_THE_ROAD);
+        addCase("c1", RiskBand.CRITICAL);
+        FixedTravelTime roads = new FixedTravelTime()
+                .from(NEAR_ACROSS_THE_LAKE, 900)                  // 15 minutes around the lake
+                .from(FARTHER_ON_THE_ROAD, 300);                  // 5 minutes straight down the road
+
+        Assignment sent = dispatcherWith(roads).dispatchNext().orElseThrow();
+
+        assertEquals("als-road", sent.resourceId());
+    }
+
+    /** A unit the road model cannot route is tried last, but still tried: better than no unit at all. */
+    @Test
+    void aUnitThatCannotReachThePatientIsTriedLast() {
+        addResource("als-cut-off", ResourceType.AMBULANCE_ALS, NEAR_ACROSS_THE_LAKE);
+        addResource("als-road", ResourceType.AMBULANCE_ALS, FARTHER_ON_THE_ROAD);
+        FixedTravelTime roads = new FixedTravelTime().unreachable(NEAR_ACROSS_THE_LAKE).from(FARTHER_ON_THE_ROAD, 600);
+        Dispatcher withRoads = dispatcherWith(roads);
+
+        addCase("c1", RiskBand.CRITICAL);
+        assertEquals("als-road", withRoads.dispatchNext().orElseThrow().resourceId());
+        addCase("c2", RiskBand.CRITICAL);
+        assertEquals("als-cut-off", withRoads.dispatchNext().orElseThrow().resourceId());
+    }
+
+    /**
+     * Only the nearest five are timed (each costs a route): the sixth keeps its place after them even if it would be
+     * fastest, and equal times keep the database's order.
+     */
+    @Test
+    void onlyTheNearestFiveAreRankedAndTiesKeepTheirOrder() {
+        List<Resource> nearestFirst = new java.util.ArrayList<>();
+        FixedTravelTime roads = new FixedTravelTime();
+        for (int i = 1; i <= 6; i++) {
+            Location where = new Location(0.009 + i * 0.001, 0);
+            nearestFirst.add(addResource("als-" + i, ResourceType.AMBULANCE_ALS, where));
+            roads.from(where, i == 6 ? 10 : 500);                // the sixth would be the fastest by far
+        }
+
+        List<Resource> order = dispatcherWith(roads).fastestFirst(nearestFirst, ORIGIN);
+
+        List<String> ids = new java.util.ArrayList<>();
+        for (Resource r : order) {
+            ids.add(r.id());
+        }
+        assertEquals(List.of("als-1", "als-2", "als-3", "als-4", "als-5", "als-6"), ids);
+    }
+
+    /** With the straight-line default, ranking by time changes nothing: the nearest is sent, as before. */
+    @Test
+    void theDefaultStillSendsTheNearest() {
+        addResource("als-lake", ResourceType.AMBULANCE_ALS, NEAR_ACROSS_THE_LAKE);
+        addResource("als-road", ResourceType.AMBULANCE_ALS, FARTHER_ON_THE_ROAD);
+        addCase("c1", RiskBand.CRITICAL);
+
+        assertEquals("als-lake", dispatcher.dispatchNext().orElseThrow().resourceId());
+    }
+
+    @Test
+    void aMissingTravelTimeIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new Dispatcher(queue, patients, resources, claimer,
+                assignments, new LadderResponseDecider(), events, clock, 20.0, null));
+    }
 }

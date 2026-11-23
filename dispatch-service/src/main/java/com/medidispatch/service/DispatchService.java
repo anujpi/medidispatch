@@ -16,6 +16,7 @@ import com.medidispatch.core.engine.AssignmentManager;
 import com.medidispatch.core.engine.CaseManager;
 import com.medidispatch.core.engine.DispatchCoordinator;
 import com.medidispatch.core.engine.ProcessingResult;
+import com.medidispatch.core.engine.StraightLineTravelTime;
 import com.medidispatch.core.engine.TimeoutMonitor;
 import com.medidispatch.core.engine.TransportCoordinator;
 import com.medidispatch.core.engine.TripMonitor;
@@ -26,6 +27,7 @@ import com.medidispatch.core.port.CaseRepository;
 import com.medidispatch.core.port.FacilityRepository;
 import com.medidispatch.core.port.PatientRepository;
 import com.medidispatch.core.port.ResourceRepository;
+import com.medidispatch.core.port.TravelTime;
 import com.medidispatch.core.port.VitalsRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -63,13 +66,6 @@ import java.util.Set;
 @Service
 public class DispatchService {
 
-    /**
-     * Ambulance speed for the pre-alert ETA, on a straight line to the hospital.
-     */
-    // ponytail: straight line at a fixed 40 km/h, no roads or traffic; a routing service later (BACKLOG: ETA instead
-    // of straight-line distance).
-    public static final double TRANSPORT_SPEED_KMH = 40;
-
     private final PatientRepository patients;
     private final ResourceRepository resources;
     private final CaseRepository cases;
@@ -84,6 +80,7 @@ public class DispatchService {
     private final FacilityRepository facilities;
     private final TransportCoordinator transport;
     private final VitalsRepository vitals;
+    private final TravelTime travel;
     private final Clock clock;
     private final TransactionTemplate tx;
 
@@ -104,6 +101,7 @@ public class DispatchService {
      * @param facilities        where hospitals and clinics are stored
      * @param transport         starts the second leg of a trip, scene to hospital
      * @param vitals            the patients' readings (the pre-alert shows the newest)
+     * @param travel            travel times, for the pre-alert ETA (by road when the graph is there)
      * @param clock             the engine's clock, used to timestamp snapshots
      * @param tx                runs a piece of work as one database transaction (created by Boot)
      */
@@ -112,7 +110,7 @@ public class DispatchService {
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
                            DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
                            FacilityRepository facilities, TransportCoordinator transport, VitalsRepository vitals,
-                           Clock clock, TransactionTemplate tx) {
+                           TravelTime travel, Clock clock, TransactionTemplate tx) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -127,6 +125,7 @@ public class DispatchService {
         this.facilities = facilities;
         this.transport = transport;
         this.vitals = vitals;
+        this.travel = travel;
         this.clock = clock;
         this.tx = tx;
     }
@@ -464,9 +463,12 @@ public class DispatchService {
      * A hospital's pre-alert: every patient being taken there right now, soonest first (then by trip id), with how
      * urgent they are, what they need, where the ambulance is, the ETA and the newest vitals reading.
      *
-     * <p>The ETA is the straight-line distance from the ambulance's last reported position at
-     * {@link #TRANSPORT_SPEED_KMH}, rounded UP to whole minutes, so it never says 0 while the ambulance is still on
-     * its way. It drops as the ambulance reports positions closer in. Screens poll this every few seconds.
+     * <p>The ETA is the {@link TravelTime} from the ambulance's last reported position to the hospital with the siren on
+     * (by road, in the traffic right now, when the road graph is there), rounded UP to whole minutes, so it never says 0
+     * while the ambulance is still on its way. If the roads give no route (a closure), it falls back to the straight
+     * line at {@link StraightLineTravelTime#SPEED_KMH}, so the hospital still gets an ETA. It drops as the ambulance
+     * reports positions closer in. Screens poll this every few seconds. {@code distanceKm} stays the straight-line
+     * distance, for information.
      *
      * @param facilityId the hospital
      * @return the patients on their way in; empty for a clinic or when nobody is coming
@@ -489,7 +491,10 @@ public class DispatchService {
                 Patient patient = patients.findById(c.patientId()).orElseThrow();
                 Resource unit = resources.findById(trip.resourceId()).orElseThrow();
                 double km = unit.location().distanceKmTo(hospital.location());
-                long etaMinutes = (long) Math.ceil(km / TRANSPORT_SPEED_KMH * 60);
+                OptionalDouble seconds = travel.seconds(unit.location(), hospital.location(), true);
+                double etaSeconds = seconds.isPresent() ? seconds.getAsDouble()
+                        : km / StraightLineTravelTime.SPEED_KMH * 3600;
+                long etaMinutes = (long) Math.ceil(etaSeconds / 60);
                 VitalsReading latest = vitals.latestFor(c.patientId()).orElse(null);
                 inbound.add(InboundPatient.from(trip, c, patient, unit, km, etaMinutes, latest));
             }

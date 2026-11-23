@@ -74,7 +74,8 @@ class RestartTest {
                 .web(WebApplicationType.NONE)
                 .run("--spring.datasource.url=" + TestDatabase.appUrlStarted(),
                         "--spring.datasource.username=" + TestDatabase.username(),
-                        "--spring.datasource.password=" + TestDatabase.password());
+                        "--spring.datasource.password=" + TestDatabase.password(),
+                        "--medidispatch.routing.graph-file=");     // straight lines, as in the other tests
     }
 
     // Every vital far out of range: the scorer rates this CRITICAL.

@@ -7,7 +7,10 @@ import com.medidispatch.core.response.ResponseDecider;
 import com.medidispatch.core.response.ResponsePlan;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -19,19 +22,29 @@ import java.util.Set;
  * unit of an earlier type can be had within the search radius. The claim is atomic, so two dispatchers
  * never send the same unit. If nobody can be claimed, the case goes back in the queue.
  * <p>
+ * Within a ring, the database returns units nearest first (straight line); the first
+ * {@link #RANKED_BY_TRAVEL_TIME} are then put in order of {@link TravelTime}, so a unit that is nearer but across a
+ * lake loses to one that is farther but on the right road. With the default (a straight line) the order is
+ * unchanged.
+ * <p>
  * It never takes a unit from another case ({@link Preemptor}'s job) and never sends first responders
  * ({@link SupportDispatcher}'s job); {@link DispatchCoordinator} sequences all three.
  */
 public class Dispatcher {
+
+    /** How many of a ring's nearest units are re-ranked by travel time (each costs a route). */
+    static final int RANKED_BY_TRAVEL_TIME = 5;
+
     private final CaseQueue queue;
     private final PatientRepository patients;
     private final ResourceRepository resources;
     private final ResponseDecider decider;
     private final UnitAssigner assigner;
     private final double searchRadiusKm;
+    private final TravelTime travel;
 
     /**
-     * Creates the dispatcher.
+     * Creates the dispatcher, ranking units by straight-line travel time (that is, by distance).
      *
      * @param queue          the queue of waiting cases
      * @param patients       where patients (and their locations) are stored
@@ -53,6 +66,35 @@ public class Dispatcher {
                       EventPublisher publisher,
                       Clock clock,
                       double searchRadiusKm) {
+        this(queue, patients, resources, claimer, assignments, decider, publisher, clock, searchRadiusKm,
+                new StraightLineTravelTime());
+    }
+
+    /**
+     * Creates the dispatcher.
+     *
+     * @param queue          the queue of waiting cases
+     * @param patients       where patients (and their locations) are stored
+     * @param resources      where units are stored and searched by location
+     * @param claimer        the atomic "this unit is mine" lock
+     * @param assignments    where new trips are stored
+     * @param decider        decides which unit types a case needs
+     * @param publisher      where new assignments are announced
+     * @param clock          source of assignment times
+     * @param searchRadiusKm the furthest a unit may be from the patient, in kilometres; must be positive
+     * @param travel         how long a unit takes to reach the patient (for example by road, with traffic)
+     * @throws IllegalArgumentException if an argument is missing or the radius is not positive
+     */
+    public Dispatcher(CaseQueue queue,
+                      PatientRepository patients,
+                      ResourceRepository resources,
+                      ResourceClaimer claimer,
+                      AssignmentRepository assignments,
+                      ResponseDecider decider,
+                      EventPublisher publisher,
+                      Clock clock,
+                      double searchRadiusKm,
+                      TravelTime travel) {
         if (queue == null || patients == null || resources == null || claimer == null || assignments == null
                 || decider == null || publisher == null || clock == null) {
             throw new IllegalArgumentException(
@@ -61,6 +103,10 @@ public class Dispatcher {
         if (searchRadiusKm <= 0) {
             throw new IllegalArgumentException("searchRadiusKm must be positive, got " + searchRadiusKm);
         }
+        if (travel == null) {
+            throw new IllegalArgumentException("travel is required");
+        }
+        this.travel = travel;
         this.queue = queue;
         this.patients = patients;
         this.resources = resources;
@@ -125,8 +171,43 @@ public class Dispatcher {
         return sent;
     }
 
-    // free units of these types inside this radius, nearest first: claim the first one we win
+    // free units of these types inside this radius, soonest there first: claim the first one we win
+    // ponytail: a unit just outside the ring could be faster by road; and each ranked unit is its own route (one
+    // search from the patient over the reversed graph could time them all at once)
     private Optional<Assignment> tryAssignWithin(Case c, Location where, double radiusKm, Set<ResourceType> types) {
-        return assigner.assignFirst(c, resources.findAvailableNear(where, radiusKm, types), AssignmentRole.PRIMARY);
+        List<Resource> nearestFirst = resources.findAvailableNear(where, radiusKm, types);
+        return assigner.assignFirst(c, fastestFirst(nearestFirst, where), AssignmentRole.PRIMARY);
+    }
+
+    private record Ranked(Resource unit, double seconds, int position) {}
+
+    /**
+     * Puts the first {@link #RANKED_BY_TRAVEL_TIME} units in order of travel time to the patient (siren on); the rest
+     * keep their order after them. A unit that cannot reach the patient sorts last but is still tried: better a unit
+     * the road model cannot route than no unit. Ties keep the given order, so with the straight-line default the
+     * order is exactly the database's (by distance, then id).
+     *
+     * @param nearestFirst units ordered by straight-line distance
+     * @param patient      where the patient is
+     * @return the order to try them in
+     */
+    List<Resource> fastestFirst(List<Resource> nearestFirst, Location patient) {
+        int ranked = Math.min(RANKED_BY_TRAVEL_TIME, nearestFirst.size());
+        List<Ranked> head = new ArrayList<>();
+        for (int i = 0; i < ranked; i++) {
+            Resource unit = nearestFirst.get(i);
+            OptionalDouble seconds = travel.seconds(unit.location(), patient, true);
+            head.add(new Ranked(unit, seconds.isPresent() ? seconds.getAsDouble() : Double.POSITIVE_INFINITY, i));
+        }
+        head.sort((a, b) -> {
+            int bySeconds = Double.compare(a.seconds(), b.seconds());
+            return bySeconds != 0 ? bySeconds : Integer.compare(a.position(), b.position());
+        });
+        List<Resource> order = new ArrayList<>();
+        for (Ranked r : head) {
+            order.add(r.unit());
+        }
+        order.addAll(nearestFirst.subList(ranked, nearestFirst.size()));
+        return order;
     }
 }

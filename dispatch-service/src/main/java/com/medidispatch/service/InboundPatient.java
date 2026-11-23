@@ -30,7 +30,7 @@ import java.util.Set;
  * @param latitude     where the ambulance is now
  * @param longitude    where the ambulance is now
  * @param distanceKm   straight-line distance from the ambulance to the hospital
- * @param etaMinutes   minutes until arrival, rounded up (see {@link DispatchService#TRANSPORT_SPEED_KMH})
+ * @param etaMinutes   minutes until arrival, rounded up (see {@link DispatchService#inboundTo})
  * @param latestVitals the patient's newest reading, or {@code null} if there is none
  */
 public record InboundPatient(String tripId, String caseId, String patientId, String patientName, Integer age,

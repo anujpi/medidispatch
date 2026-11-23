@@ -231,4 +231,41 @@ public class SupportDispatcherTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new SupportDispatcher(cases, patients, resources, claimer, assignments, decider, events, null));
     }
+
+    // ---------- travel time (R4) ----------
+
+    private SupportDispatcher supportWith(FixedTravelTime travel) {
+        return new SupportDispatcher(cases, patients, resources, claimer, assignments, new LadderResponseDecider(),
+                events, clock, travel);
+    }
+
+    /** The nurse is nearer in a straight line but slower by road than the ambulance: sending her helps nobody. */
+    @Test
+    void aNurseWhoIsNearerButSlowerByRoadIsNotSent() {
+        addUnit("als-1", ResourceType.AMBULANCE_ALS, FAR);
+        addUnit("nurse-1", ResourceType.NURSE, NEAR);
+        openCase("p1", RiskBand.CRITICAL);
+        Assignment ambulance = ambulanceSent();
+        FixedTravelTime roads = new FixedTravelTime().from(FAR, 600).from(NEAR, 900);
+
+        assertTrue(supportWith(roads).sendSupportFor(ambulance).isEmpty());
+        assertEquals(ResourceStatus.AVAILABLE, unitStatus("nurse-1"));
+    }
+
+    @Test
+    void aNurseWhoIsSoonerByRoadIsSent() {
+        addUnit("als-1", ResourceType.AMBULANCE_ALS, FAR);
+        addUnit("nurse-1", ResourceType.NURSE, NEAR);
+        openCase("p1", RiskBand.CRITICAL);
+        Assignment ambulance = ambulanceSent();
+        FixedTravelTime roads = new FixedTravelTime().from(FAR, 900).from(NEAR, 240);
+
+        assertEquals("nurse-1", supportWith(roads).sendSupportFor(ambulance).orElseThrow().resourceId());
+    }
+
+    @Test
+    void aMissingTravelTimeIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new SupportDispatcher(cases, patients, resources, claimer,
+                assignments, new LadderResponseDecider(), events, clock, null));
+    }
 }

@@ -18,8 +18,11 @@ Ordered roughly by priority inside each group.
       cannot be served (for example a CRITICAL case and no ALS anywhere), less urgent cases behind it that *could* be
       served (a MEDIUM case and a free nurse) wait too. Fix: when the top case gets nothing, try the next ones in the
       queue before giving up for this round.
-- [ ] **ETA instead of straight-line distance.** Ranking, ring search and "is the first responder closer" all use
-      straight-line distance. Add an `EtaCalculator` port (fixed speed first, a routing API later in Spring).
+- [x] **ETA instead of straight-line distance.** Done in R4: a `TravelTime` port; dispatch ranks the nearest five by
+      drive time, the first responder check and the hospital choice use it, and the pre-alert ETA is by road.
+- [ ] **Still straight lines after R4.** The ring search itself (candidates by km), the support search radius (the
+      primary's km) and the `Preemptor` still compare straight-line distance. Fine while the nearest five by km
+      contain the fastest by road; revisit if a river or highway makes that false.
 - [ ] **Queue aging.** Low-urgency cases can wait forever if worse ones keep arriving. Let waiting time slowly raise
       a case's priority.
 - [ ] **Hysteresis in `CaseManager`.** A patient hovering at a band boundary can flip band on every reading
