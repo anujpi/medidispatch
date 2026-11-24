@@ -47,12 +47,6 @@ public class PatientController {
     }
 
     /**
-     * {@code GET /api/patients/{id}/case}: the patient's open case. 404 if they have none.
-     *
-     * @param id the patient
-     * @return the open case
-     */
-    /**
      * {@code GET /api/patients/{id}}: the patient's full record, including the emergency contact. 200 or 404.
      *
      * @param id the patient
@@ -64,6 +58,12 @@ public class PatientController {
         return service.findPatient(id).orElseThrow(() -> new NotFoundException("Patient " + id + " not found"));
     }
 
+    /**
+     * {@code GET /api/patients/{id}/case}: the patient's open case. 404 if they have none.
+     *
+     * @param id the patient
+     * @return the open case
+     */
     @GetMapping("/patients/{id}/case")
     public CaseInfo openCase(@PathVariable String id) {
         return service.openCaseOf(id).orElseThrow(() -> new NotFoundException("Patient " + id + " has no open case"));

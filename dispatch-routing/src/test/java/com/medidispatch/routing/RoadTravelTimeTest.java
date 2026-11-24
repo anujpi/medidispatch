@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -112,6 +113,30 @@ public class RoadTravelTimeTest {
         assertEquals(new RoadTravelTime(lShape(), noIncidents(), NIGHT).seconds(A, C, false).getAsDouble(),
                 loaded.seconds(A, C, false).getAsDouble(), 1e-6);
         assertEquals(3, loaded.graph().nodeCount());
+    }
+
+    /** The drive is the same answer as seconds(), with the way: start, the road nodes, end. */
+    @Test
+    void theDriveGivesTheWayAndTheSameTime() {
+        RoadTravelTime travel = new RoadTravelTime(lShape(), noIncidents(), NIGHT);
+        Location offRoad = new Location(LAT, LON - 0.0009);                    // about 100 m west of A
+
+        Drive drive = travel.drive(offRoad, C, true).orElseThrow();
+
+        assertEquals(List.of(offRoad, A, B, C), drive.points());                // C is on its node: not repeated
+        assertEquals(List.of(A, A), travel.drive(A, A, false).orElseThrow().points());
+        assertEquals(travel.seconds(offRoad, C, true).getAsDouble(), drive.seconds(), 1e-9);
+        assertEquals((offRoad.distanceKmTo(A) + A.distanceKmTo(B) + B.distanceKmTo(C)) * 1000, drive.metres(), 1);
+    }
+
+    @Test
+    void aClosureOnTheOnlyRoadGivesNoDrive() {
+        TrafficModel traffic = noIncidents();
+        traffic.add(Incident.closure("cut", new Location(LAT + 0.01, LON + 0.005), 150));
+
+        assertTrue(new RoadTravelTime(lShape(), traffic, NIGHT).drive(A, C, true).isEmpty());
+        assertThrows(IllegalArgumentException.class,
+                () -> new RoadTravelTime(lShape(), traffic, NIGHT).drive(null, C, true));
     }
 
     @Test

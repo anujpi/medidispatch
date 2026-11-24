@@ -4,12 +4,15 @@ import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.ResourceType;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A fake unit (ambulance, nurse or doctor) that drives to its patient.
  * <p>
- * When it gets a trip it waits {@link #ACK_DELAY} before setting off (the crew answering), then moves in a
- * straight line at its speed. Each trip comes with a {@link Behaviour}: most trips go normally, but a unit can
+ * When it gets a trip it waits {@link #ACK_DELAY} before setting off (the crew answering), then drives: in a
+ * straight line at its type's speed, or, once it is given a route ({@link #follow}), along the route's points at the
+ * route's own average speed, so it arrives when the router said it would. Each trip comes with a {@link Behaviour}: most trips go normally, but a unit can
  * never answer, break down halfway (stops moving, keeps reporting) or lose its signal halfway (keeps moving,
  * stops reporting). The engine is expected to notice the last three on its own.
  * <p>
@@ -43,6 +46,12 @@ final class SimulatedUnit {
     private final Location home;                   // its base; null: parks where a trip ends
     private Location position;
     private boolean goingHome;
+
+    // the way ahead (trip or drive home): the points still to reach, in order; the last one is the destination
+    private List<Location> waypoints = List.of();
+    private int next;                              // the waypoint being driven to
+    private double restKm;                         // length of the way AFTER waypoints[next]
+    private double legSpeedKmPerHour;              // this leg's speed: the type's, or the route's average
 
     // the current trip; assignmentId is null when the unit is free
     private String assignmentId;
@@ -96,6 +105,7 @@ final class SimulatedUnit {
         this.assignmentId = assignmentId;
         this.target = target;
         this.behaviour = behaviour;
+        driveStraight(target);
         this.tripKm = position.distanceKmTo(target);
         this.waited = Duration.ZERO;
         this.acknowledged = false;
@@ -119,6 +129,7 @@ final class SimulatedUnit {
         }
         this.target = destination;
         this.behaviour = Behaviour.NORMAL;
+        driveStraight(destination);
         this.tripKm = position.distanceKmTo(destination);
         this.arrived = false;
         this.broken = false;
@@ -129,7 +140,79 @@ final class SimulatedUnit {
     void headHome() {
         if (assignmentId == null && home != null && !position.equals(home)) {
             goingHome = true;
+            driveStraight(home);
         }
+    }
+
+    /**
+     * Drives the current leg (to the patient, to the hospital, or home) along a route instead of the straight line,
+     * at the route's average speed. The route should start about where the unit is; it ends exactly at the leg's
+     * destination (its last point is replaced by it, so a rounded number cannot make the unit miss).
+     *
+     * @param points  the route, start first, at least two points
+     * @param seconds how long the route takes; 0 or less keeps the type's speed
+     * @throws IllegalArgumentException if there are fewer than two points
+     * @throws IllegalStateException    if the unit is not driving anywhere (free and not going home)
+     */
+    void follow(List<Location> points, double seconds) {
+        if (points == null || points.size() < 2) {
+            throw new IllegalArgumentException("a route has at least two points");
+        }
+        Location destination = goingHome ? home : target;
+        if (destination == null || (assignmentId == null && !goingHome)) {
+            throw new IllegalStateException(id + " is not driving anywhere");
+        }
+        List<Location> way = new ArrayList<>(points.subList(1, points.size()));
+        way.set(way.size() - 1, destination);
+        double km = position.distanceKmTo(way.getFirst());
+        for (int i = 1; i < way.size(); i++) {
+            km += way.get(i - 1).distanceKmTo(way.get(i));
+        }
+        setWay(way);
+        if (assignmentId != null) {
+            tripKm = km;                                  // halfway is half the road, not half the straight line
+        }
+        if (seconds > 0 && km > 0) {
+            legSpeedKmPerHour = km / (seconds / 3600);
+        }
+    }
+
+    private void driveStraight(Location destination) {
+        setWay(List.of(destination));
+    }
+
+    private void setWay(List<Location> way) {
+        waypoints = List.copyOf(way);
+        next = 0;
+        restKm = 0;
+        for (int i = 1; i < waypoints.size(); i++) {
+            restKm += waypoints.get(i - 1).distanceKmTo(waypoints.get(i));
+        }
+        legSpeedKmPerHour = speedKmPerHour;
+    }
+
+    // moves along the waypoints by up to km; true when the last one is reached
+    private boolean advance(double km) {
+        while (next < waypoints.size()) {
+            Location to = waypoints.get(next);
+            double d = position.distanceKmTo(to);
+            if (d > km) {
+                position = CityMap.towards(position, to, km);
+                return false;
+            }
+            position = to;
+            km -= d;
+            next++;
+            if (next < waypoints.size()) {
+                restKm -= to.distanceKmTo(waypoints.get(next));
+            }
+        }
+        return true;
+    }
+
+    // how far is still to go along the way
+    private double remainingKm() {
+        return next < waypoints.size() ? position.distanceKmTo(waypoints.get(next)) + Math.max(0, restKm) : 0;
     }
 
     /**
@@ -141,8 +224,7 @@ final class SimulatedUnit {
      */
     TickResult tick(Duration dt) {
         if (assignmentId == null && goingHome) {
-            position = CityMap.towards(position, home, speedKmPerHour * dt.toMillis() / 3_600_000.0);
-            if (position.equals(home)) {
+            if (advance(legSpeedKmPerHour * dt.toMillis() / 3_600_000.0)) {
                 goingHome = false;                        // back at base
             }
             return TickResult.NOTHING;
@@ -164,9 +246,8 @@ final class SimulatedUnit {
         if (broken) {
             return TickResult.NOTHING;                        // stuck where it broke down
         }
-        double km = speedKmPerHour * dt.toMillis() / 3_600_000.0;
-        position = CityMap.towards(position, target, km);
-        if (position.distanceKmTo(target) <= tripKm / 2) {    // halfway: a planned problem starts here
+        boolean there = advance(legSpeedKmPerHour * dt.toMillis() / 3_600_000.0);
+        if (remainingKm() <= tripKm / 2) {                    // halfway: a planned problem starts here
             if (behaviour == Behaviour.BREAKS_DOWN) {
                 broken = true;
             }
@@ -174,7 +255,7 @@ final class SimulatedUnit {
                 silent = true;
             }
         }
-        if (position.equals(target)) {
+        if (there) {
             arrived = true;
             return silent ? TickResult.NOTHING : TickResult.ARRIVED;   // without signal, nobody hears it arrive
         }
@@ -186,6 +267,7 @@ final class SimulatedUnit {
         assignmentId = null;
         target = null;
         behaviour = null;
+        waypoints = List.of();
     }
 
     /**
@@ -209,4 +291,6 @@ final class SimulatedUnit {
     boolean arrived()           { return arrived; }
     Location target()           { return target; }       // null when free
     boolean goingHome()         { return goingHome; }
+    Location home()             { return home; }        // null: no base
+    double legSpeedKmPerHour()  { return legSpeedKmPerHour; }
 }

@@ -7,6 +7,7 @@ import com.medidispatch.sim.SimulatedUnit.TickResult;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -221,5 +222,98 @@ public class SimulatedUnitTest {
 
         assertFalse(unit.goingHome());
         assertEquals(START, unit.position());
+    }
+
+    // ---------- along a route (R5b) ----------
+
+    // a detour round a "lake": east, north, then west to the patient (about 6.5 km instead of 2.2)
+    private static final Location EAST = new Location(12.90, 77.52);
+    private static final Location NORTH_EAST = new Location(12.92, 77.52);
+    private static final List<Location> DETOUR = List.of(START, EAST, NORTH_EAST, PATIENT);
+    private static final double ROUTE_SECONDS = 600;
+
+    @Test
+    void aUnitFollowsTheRouteAndArrivesInTheRoutesTime() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.NORMAL);
+        unit.follow(DETOUR, ROUTE_SECONDS);
+        answer(unit);
+
+        double furthestEast = 0;
+        int ticks = 0;
+        TickResult last = TickResult.NOTHING;
+        while (last != TickResult.ARRIVED && ticks < 100) {
+            last = unit.tick(TICK);
+            ticks++;
+            furthestEast = Math.max(furthestEast, unit.position().longitude());
+            assertTrue(unit.position().longitude() >= 77.50 - 1e-9, "never west of the route");
+        }
+
+        assertEquals(TickResult.ARRIVED, last);
+        assertEquals(PATIENT, unit.position());
+        assertEquals(77.52, furthestEast, 1e-9);                                  // it went round the corner
+        assertTrue(ticks >= 59 && ticks <= 61, "600 s at 10 s a tick, took " + ticks);
+    }
+
+    /** Halfway is half the ROAD: on the detour that is the middle of the north leg, not the middle of the line. */
+    @Test
+    void aBreakdownHappensHalfwayAlongTheRoute() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.BREAKS_DOWN);
+        unit.follow(DETOUR, ROUTE_SECONDS);
+        answer(unit);
+
+        driveFor(unit, 100);
+
+        assertTrue(unit.broken());
+        assertEquals(77.52, unit.position().longitude(), 1e-6);                   // on the north leg
+        assertEquals(12.91, unit.position().latitude(), 0.002);                    // about its middle
+    }
+
+    /** The route's last point may be rounded: the unit still ends exactly at the patient. */
+    @Test
+    void theUnitEndsExactlyAtTheDestination() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.NORMAL);
+        unit.follow(List.of(START, new Location(12.9200001, 77.5000001)), 60);
+        answer(unit);
+
+        assertEquals(TickResult.ARRIVED, driveFor(unit, 100));
+        assertEquals(PATIENT, unit.position());
+    }
+
+    @Test
+    void theDriveHomeCanFollowARouteToo() {
+        SimulatedUnit unit = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, PATIENT, START);
+        unit.headHome();
+        unit.follow(List.of(PATIENT, NORTH_EAST, EAST, START), ROUTE_SECONDS);
+
+        int ticks = 0;
+        while (unit.goingHome() && ticks < 100) {
+            unit.tick(TICK);
+            ticks++;
+        }
+
+        assertFalse(unit.goingHome());
+        assertEquals(START, unit.position());
+        assertTrue(ticks >= 59 && ticks <= 61, "took " + ticks);
+    }
+
+    @Test
+    void aRouteNeedsSomewhereToGoAndTwoPoints() {
+        SimulatedUnit free = new SimulatedUnit("als-1", ResourceType.AMBULANCE_ALS, START);
+        assertThrows(IllegalStateException.class, () -> free.follow(DETOUR, ROUTE_SECONDS));
+
+        SimulatedUnit busy = ambulanceOnTrip(Behaviour.NORMAL);
+        assertThrows(IllegalArgumentException.class, () -> busy.follow(List.of(PATIENT), ROUTE_SECONDS));
+        assertThrows(IllegalArgumentException.class, () -> busy.follow(null, ROUTE_SECONDS));
+    }
+
+    /** No time given: the type's own speed is kept. */
+    @Test
+    void aRouteWithoutATimeKeepsTheTypesSpeed() {
+        SimulatedUnit unit = ambulanceOnTrip(Behaviour.NORMAL);
+        double typeSpeed = unit.legSpeedKmPerHour();
+
+        unit.follow(DETOUR, 0);
+
+        assertEquals(typeSpeed, unit.legSpeedKmPerHour());
     }
 }

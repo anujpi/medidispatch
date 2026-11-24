@@ -21,7 +21,7 @@ and warns it before the patient arrives.
 | `dispatch-core` | pure-Java engine: scoring placeholder, cases, response ladder, ring search, claim, preemption, first responders, response upgrade, timeouts, trip monitoring, recovery, back in service |
 | `dispatch-sim` | seeded 2-hour simulation + endless threaded live city (`LiveSimulation`) |
 | `dispatch-sim-fx` | JavaFX window: live map, panel, report |
-| tests | 986 (624 core, 88 sim, 22 fx, 178 service, 74 routing) |
+| tests | 1003 (624 core, 95 sim, 22 fx, 184 service, 78 routing) |
 | `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); on Postgres + PostGIS + TimescaleDB (JDBC adapters, JPA for trips, one transaction per call inside the lock, survives a restart). Hospitals and clinics: registry, destination choice, transport leg, V2 schema, endpoints, each hospital's fleet and inbound pre-alert |
 
 ---
@@ -201,14 +201,14 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
   - [x] S1: the city set up over HTTP, readings, positions, crews' steps from the live feed, end-to-end test
   - [x] S2: transport to hospital, return to base
 - [x] live map page on OpenStreetMap, reading the live feed (F, added Nov 22): /map.html, Leaflet
-- [ ] routing on real roads (added Nov 22, before security by the user's choice)
+- [x] routing on real roads (added Nov 22, before security by the user's choice; R2b optional later)
   - [x] R1: Bangalore's roads from OpenStreetMap as a graph (CSR), cleanup, snapping, graph file
   - [x] R2: Dijkstra, then A* on travel time (L): 5-50 ms per route on Bangalore
   - [ ] R2b (later): ALT landmarks for a much better A* estimate
   - [x] R3: traffic model: road-class speeds, rush hours, incidents, siren (L)
   - [x] R4: TravelTime port in core; dispatch ranking, hospital choice and ETA by drive time (road graph + traffic
         in the service, straight line when the graph file is missing)
-  - [ ] R5: simulator drives along routes; the map draws them
+  - [x] R5: route and incidents API; the simulator drives along routes; the map draws them and the incidents
 - [ ] M1b: map views (streets / plain / dark / satellite), layer toggles, bigger markers, live speed control
 - [ ] security moved up: login, roles, hospital scoping (L; it was in week 2)
 

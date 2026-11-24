@@ -42,8 +42,8 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (986 tests: 624 in dispatch-core, 88 in dispatch-sim, 22 in dispatch-sim-fx, 178 in dispatch-service,
-74 in dispatch-routing)
+## Built so far (1003 tests: 624 in dispatch-core, 95 in dispatch-sim, 22 in dispatch-sim-fx, 184 in dispatch-service,
+78 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
 driver), Facility/FacilityKind/Capability (hospitals and clinics, see "Hospitals" below), Location (haversine),
@@ -703,7 +703,7 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1, S2 and M1 are done. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+S1, S2, M1 and routing R1-R5 are done. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
 (map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
 console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
 only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
@@ -711,7 +711,7 @@ Clarified with the user: the backend service is the REAL application's core; the
 map.html are dev/demo tools; the real front end (React control room, crew PWA, hospital panel, patient app) is
 still to be built.
 
-## Routing (R1, R2, R3, R4 DONE; R5 next), module dispatch-routing, package com.medidispatch.routing
+## Routing (R1-R5 DONE; R2b ALT landmarks later), module dispatch-routing, package com.medidispatch.routing
 Why: everything moves and is measured in straight lines today (units fly over lakes; dispatch picks the nearest as
 the crow flies; ETA = straight line at 40 km/h). Decided: write our own graph and algorithms (not OSRM/GraphHopper)
 for the learning and portfolio value; traffic = a MODEL (road-class speeds, rush-hour factors, simulated incidents,
@@ -825,8 +825,43 @@ routes and the map draws them.
   Tests: RoadTravelTimeTest 7 (L-shaped road longer than the line, snap legs added, peak = night / 0.4, siren faster,
   closure -> empty, load() from a file, bad args), RoutingConfigTest 4 (no file -> straight line, file -> roads, blank
   = off, relative path tried one folder up).
-- R5 next: the simulator drives along routes (units follow the streets), the live feed carries each unit's route,
-  the map draws them; an incidents API so jams and closures can be made while it runs.
+- R5 decided: the service is the only place that knows the roads; the simulator and the map ASK it over HTTP
+  (like a crew phone asking for navigation), so dispatch-sim stays without the graph and the in-memory/JavaFX
+  simulators keep straight lines. Routes are NOT stored (stateless): the crew and the map ask the same question at
+  almost the same moment and get the same line (upgrade: the trip stores its route once real crew apps report
+  theirs). No re-routing mid-leg: a closure only affects legs planned after it (traffic frozen at departure, R3).
+  Incidents are not in the live feed (the map polls them), so LiveSnapshot and DispatchService are unchanged.
+- R5a (routing + service): record Drive(points >= 2, seconds, metres) (points copied); RoadTravelTime.drive(from,
+  to, emergency) -> Optional<Drive>: from, the route's nodes, to (an end exactly on its node is not repeated; A to A
+  gives [A, A]); seconds() = drive().seconds(), one path. api/RouteController(TravelTime, TrafficModel):
+  GET /api/route?fromLat&fromLon&toLat&toLon&emergency(default false) -> RouteInfo(seconds, metres,
+  points [[lat, lon], ...]) (pairs: a cross-city route has 1000+ points); `travel instanceof RoadTravelTime` (core
+  needs no route port), else the straight line [from, to] at 40 km/h; 404 NotFoundException when closures leave no
+  way; 400 for a missing/non-number param (Spring) or a bad Location (IAE). POST /api/incidents (IncidentRequest
+  {id, position{latitude, longitude}, radiusMetres, speedFactor}, 201, same id replaces), GET /api/incidents
+  (Incident records, sorted by id), DELETE /api/incidents/{id} (204, also for an unknown id). ponytail: incidents
+  in memory only and open to anyone until SEC. Also fixed a misplaced Javadoc in PatientController.
+  Tests: DriveTest 2, RoadTravelTimeTest +2 (drive points/time/length, closure -> empty), RouteControllerTest 2
+  (plain JUnit on an L-shaped road: route follows the roads, an incident added through the controller closes it and
+  removing it reopens), ApiTest +4 (straight-line route over HTTP, bad route params 400, incidents add/replace/
+  list/delete twice, bad incidents 400).
+- R5b (simulator): CityLink.route(from, to, emergency) -> Optional<Way(points, seconds)>, a DEFAULT method returning
+  empty (straight line), so LiveEngine is unchanged; unlike the other calls it WAITS. HttpLink.route: GET /api/route
+  on the calling agent thread (a read, needs no place in the sender's order); 404 -> empty quietly, other failures
+  counted as errors and empty; static way(JsonNode) parses the answer. LiveUnit asks on START and LEG (siren) and on
+  heading home after a trip or a repair (no siren; private headHome()/drive()). SimulatedUnit moves along waypoints
+  (next index, restKm = length after the current waypoint, legSpeedKmPerHour); the straight line is ONE waypoint,
+  so the old behaviour is unchanged exactly. follow(points, seconds): skips the first point, replaces the last with
+  the leg's real destination, speed = route km / seconds (seconds <= 0 keeps the type's speed), tripKm = road length
+  so "halfway" (breakdown, signal loss) is half the ROAD; refused when the unit is going nowhere (ISE) or < 2 points
+  (IAE). New accessors home(), legSpeedKmPerHour().
+  Tests: SimulatedUnitTest +6 (detour followed, arrives in the route's 600 s +-1 tick, breakdown in the middle of
+  the north leg, ends exactly at the patient, drive home follows a route, refusals, no time keeps the type's speed),
+  HttpLinkTest +1 (way() parsing). SimulatorOverHttpTest now exercises /api/route on every leg (errors 0).
+- R5c (map): see "Live map".
+- R5 verified in the browser pane against the running city with the real graph (Nov 24): trip routes of 177 and
+  317 points, trimming advanced (15 -> 62, 22 -> 77 in ~8 s), a nurse following the streets through CV Raman
+  Nagar, the Silk Board closure drawn red, no console errors.
 
 ## Live map (M1, DONE)
 - dispatch-service/src/main/resources/static/map.html: served by Spring Boot from static/ (no controller), open
@@ -844,5 +879,12 @@ routes and the map draws them.
 - Bugs found in the browser check: (1) first fitBounds ran while the pane was tiny -> zoom 19; fixed with
   map.invalidateSize() + maxZoom 13. (2) the hospital list was rebuilt every second, swallowing clicks; now rebuilt
   only when its content key changes. Browsers cache the page: Ctrl+F5 after changing it.
-- Test: ApiTest.theLiveMapPageIsServed (200, listens to /api/live, uses OpenStreetMap tiles).
+- R5c: trip lines follow the roads. routes Map keyed "tripId|patient" or "tripId|hospital" (TRANSPORTING) ->
+  {points, next}; askRoute() fetches /api/route ONCE per leg from the unit's position at that moment, emergency=true
+  (the same question as the crew); until the answer, or with none, the straight line. ahead(): nearest route point
+  to the unit, searching only FORWARD from `next` (a road passing near itself cannot make the line jump back),
+  draws [unit, ...points after it]. Legs no longer active are forgotten. Incidents: GET /api/incidents every 5 s,
+  L.circle per id (red closure, orange jam, popup), pruned. Legend: route, jam, closed.
+- Test: ApiTest.theLiveMapPageIsServed (200, listens to /api/live, uses OpenStreetMap tiles, fetches /api/route and
+  /api/incidents).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

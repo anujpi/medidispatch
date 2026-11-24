@@ -8,6 +8,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
 
@@ -65,6 +67,22 @@ public final class RoadTravelTime implements TravelTime {
      */
     @Override
     public OptionalDouble seconds(Location from, Location to, boolean emergency) {
+        Optional<Drive> drive = drive(from, to, emergency);
+        return drive.isEmpty() ? OptionalDouble.empty() : OptionalDouble.of(drive.get().seconds());
+    }
+
+    /**
+     * The whole drive, for following it and drawing it: the same answer as {@link #seconds}, with the way.
+     *
+     * @param from      where the drive starts
+     * @param to        where it ends
+     * @param emergency {@code true} with the siren on
+     * @return {@code from}, the road nodes in order, {@code to} (an end that is exactly on its node is not
+     *         repeated); the time and length include the snap legs; empty if
+     *         there is no route
+     * @throws IllegalArgumentException if a point is missing
+     */
+    public Optional<Drive> drive(Location from, Location to, boolean emergency) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to are required");
         }
@@ -73,9 +91,19 @@ public final class RoadTravelTime implements TravelTime {
         double legMetres = (from.distanceKmTo(g.location(a)) + to.distanceKmTo(g.location(b))) * 1000;
         Optional<Route> route = new Router(g, traffic.at(clock.instant(), emergency)).aStar(a, b);
         if (route.isEmpty()) {
-            return OptionalDouble.empty();
+            return Optional.empty();
         }
-        return OptionalDouble.of(route.get().seconds() + legMetres / SNAP_LEG_METRES_PER_SECOND);
+        List<Location> roads = route.get().points(g);
+        List<Location> points = new ArrayList<>(roads.size() + 2);
+        if (!from.equals(roads.getFirst())) {
+            points.add(from);                                 // no repeated point when it starts right on a node
+        }
+        points.addAll(roads);
+        if (!to.equals(roads.getLast()) || points.size() == 1) {
+            points.add(to);                                   // at least two points, even for a drive to the same node
+        }
+        return Optional.of(new Drive(points, route.get().seconds() + legMetres / SNAP_LEG_METRES_PER_SECOND,
+                route.get().metres() + legMetres));
     }
 
     /** @return the road network (for startup logging, and for drawing routes) */

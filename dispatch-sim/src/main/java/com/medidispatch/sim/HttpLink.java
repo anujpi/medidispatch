@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,6 +63,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * ambulance with a HIGH or CRITICAL patient asks the service to transport ({@link #needsFor} picks what the patient
  * needs), drives to the hospital the service chose and hands over (the patient is treated there); anyone else is
  * treated and done on scene. A unit with a base then drives home.
+ * <p>
+ * <b>Roads.</b> When a leg starts, the unit asks the service for the way ({@link #route}) and drives it at the
+ * route's own pace, so the ambulances on the map follow the streets and arrive when the service expected.
  * <p>
  * Failed requests are counted (409s separately: in a live system "that trip has already ended" is normal) and never
  * stop the city.
@@ -250,6 +254,43 @@ final class HttpLink implements CityLink {
                 onSceneSince.put(assignmentId, clock.instant());
             }
         });
+    }
+
+    /**
+     * Asks the service for the way by road ({@code GET /api/route}). Runs on the calling agent's thread and waits:
+     * it is a read, so it needs no place in the sender's order. A 404 (closures leave no way through) or any failure
+     * gives empty, and the unit drives in a straight line; only a failure is counted as an error.
+     */
+    @Override
+    public Optional<Way> route(Location from, Location to, boolean emergency) {
+        String path = "/api/route?fromLat=" + from.latitude() + "&fromLon=" + from.longitude()
+                + "&toLat=" + to.latitude() + "&toLon=" + to.longitude() + "&emergency=" + emergency;
+        try {
+            ServiceClient.Response r = service.get(path);
+            if (r.status() == 404) {
+                return Optional.empty();
+            }
+            if (!r.ok() || r.body() == null) {
+                error("route answered " + r.status());
+                return Optional.empty();
+            }
+            return Optional.of(way(r.body()));
+        } catch (RuntimeException e) {
+            error("route: " + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * @param answer the body of {@code GET /api/route}: {@code {"seconds": .., "points": [[lat, lon], ..]}}
+     * @return the way
+     */
+    static Way way(JsonNode answer) {
+        List<Location> points = new ArrayList<>();
+        for (JsonNode p : answer.path("points")) {
+            points.add(new Location(p.get(0).asDouble(), p.get(1).asDouble()));
+        }
+        return new Way(points, answer.path("seconds").asDouble());
     }
 
     @Override

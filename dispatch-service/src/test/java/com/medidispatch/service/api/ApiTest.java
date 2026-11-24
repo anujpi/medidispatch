@@ -16,7 +16,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -523,5 +525,76 @@ class ApiTest {
 
         assertTrue(page.contains("new EventSource('/api/live')"), "the page must listen to the live feed");
         assertTrue(page.contains("tile.openstreetmap.org"), "the page must draw OpenStreetMap streets");
+        assertTrue(page.contains("fetch('/api/route?'"), "trips are drawn along the roads");
+        assertTrue(page.contains("fetch('/api/incidents')"), "incidents are drawn");
+    }
+
+    /** The tests run without the road graph: the route is the straight line at 40 km/h, start and end only. */
+    @Test
+    void aRouteOverHttpIsTheStraightLineWithoutTheRoadGraph() throws Exception {
+        Location from = new Location(12.97, 77.59);
+        Location to = new Location(13.07, 77.59);
+
+        String body = http.perform(get("/api/route").param("fromLat", "12.97").param("fromLon", "77.59")
+                        .param("toLat", "13.07").param("toLon", "77.59").param("emergency", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.points.length()").value(2))
+                .andExpect(jsonPath("$.points[0][0]").value(12.97))
+                .andExpect(jsonPath("$.points[1][0]").value(13.07))
+                .andReturn().getResponse().getContentAsString();
+
+        double km = from.distanceKmTo(to);
+        assertEquals(km * 1000, ((Number) JsonPath.read(body, "$.metres")).doubleValue(), 1e-6);
+        assertEquals(km / 40 * 3600, ((Number) JsonPath.read(body, "$.seconds")).doubleValue(), 1e-6);
+    }
+
+    @Test
+    void aBadRouteQuestionIs400() throws Exception {
+        http.perform(get("/api/route").param("fromLat", "12.97").param("fromLon", "77.59").param("toLat", "13.07"))
+                .andExpect(status().isBadRequest());
+        http.perform(get("/api/route").param("fromLat", "95").param("fromLon", "77.59")
+                        .param("toLat", "13.07").param("toLon", "77.59"))
+                .andExpect(status().isBadRequest());
+        http.perform(get("/api/route").param("fromLat", "abc").param("fromLon", "77.59")
+                        .param("toLat", "13.07").param("toLon", "77.59"))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** Add, replace, list, remove (twice: safe to repeat). */
+    @Test
+    void incidentsCanBeAddedListedAndRemoved() throws Exception {
+        String jam = """
+                {"id": "api-silk-board", "position": {"latitude": 12.917, "longitude": 77.623},
+                 "radiusMetres": 300, "speedFactor": 0.2}""";
+        String closed = jam.replace("0.2", "0");
+        http.perform(post("/api/incidents").contentType(MediaType.APPLICATION_JSON).content(jam))
+                .andExpect(status().isCreated());
+        http.perform(post("/api/incidents").contentType(MediaType.APPLICATION_JSON).content(closed))
+                .andExpect(status().isCreated());
+
+        http.perform(get("/api/incidents"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == 'api-silk-board')].speedFactor").value(0.0))
+                .andExpect(jsonPath("$[?(@.id == 'api-silk-board')].centre.latitude").value(12.917))
+                .andExpect(jsonPath("$[?(@.id == 'api-silk-board')].radiusMetres").value(300.0));
+
+        http.perform(delete("/api/incidents/api-silk-board")).andExpect(status().isNoContent());
+        http.perform(delete("/api/incidents/api-silk-board")).andExpect(status().isNoContent());
+        http.perform(get("/api/incidents"))
+                .andExpect(jsonPath("$[?(@.id == 'api-silk-board')]").isEmpty());
+    }
+
+    @Test
+    void aBadIncidentIs400() throws Exception {
+        String[] bad = {
+                "{\"id\": \"x\", \"radiusMetres\": 300, \"speedFactor\": 0.2}",
+                "{\"id\": \"x\", \"position\": {\"latitude\": 12.9, \"longitude\": 77.6}, \"radiusMetres\": 0, \"speedFactor\": 0.2}",
+                "{\"id\": \"x\", \"position\": {\"latitude\": 12.9, \"longitude\": 77.6}, \"radiusMetres\": 300, \"speedFactor\": 1}",
+                "{\"id\": \" \", \"position\": {\"latitude\": 12.9, \"longitude\": 77.6}, \"radiusMetres\": 300, \"speedFactor\": 0.2}"
+        };
+        for (String body : bad) {
+            http.perform(post("/api/incidents").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+        }
     }
 }

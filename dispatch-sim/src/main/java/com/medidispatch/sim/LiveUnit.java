@@ -20,7 +20,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * time and reports that it is back in service.
  * <p>
  * Threads: it runs as a repeating task on the agent pool ({@link #run()}). The engine thread hands it trip orders
- * through a thread-safe inbox ({@link #order(TripOrder)}), which {@code run()} reads. What the window shows is
+ * through a thread-safe inbox ({@link #order(TripOrder)}), which {@code run()} reads. When a leg starts (to the
+ * patient, to the hospital, home) it asks the link for the way by road ({@link CityLink#route}) and follows it. What the window shows is
  * published as an immutable {@link UnitView} in a {@code volatile} field, so any thread can read it safely.
  */
 final class LiveUnit implements Runnable {
@@ -104,7 +105,7 @@ final class LiveUnit implements Runnable {
             backInServiceAt = null;
             link.position(unit.id(), unit.position());      // the engine may have an old position for it
             link.backInService(unit.id());
-            unit.headHome();
+            headHome();
         }
         if (elapsed.isPositive()) {                           // nothing moves while the clock is paused
             TickResult result = unit.tick(elapsed);
@@ -129,6 +130,7 @@ final class LiveUnit implements Runnable {
                 case START -> {
                     unit.assign(order.assignmentId(), order.target(), behaviour());
                     role = order.role();
+                    drive(order.target(), true);
                 }
                 case ROLE -> {
                     if (order.assignmentId().equals(unit.assignmentId())) {
@@ -138,6 +140,7 @@ final class LiveUnit implements Runnable {
                 case LEG -> {
                     if (order.assignmentId().equals(unit.assignmentId())) {
                         unit.goTo(order.target());
+                        drive(order.target(), true);
                     }
                 }
                 case END -> {
@@ -148,12 +151,29 @@ final class LiveUnit implements Runnable {
                                 || order.finalStatus() == AssignmentStatus.FAILED) {
                             backInServiceAt = now.plus(config.repairTime());   // the engine took it offline
                         } else {
-                            unit.headHome();                  // only a unit with a base has a home to go to
+                            headHome();                       // only a unit with a base has a home to go to
                         }
                     }
                 }
             }
             order = inbox.poll();
+        }
+    }
+
+    // a unit with a base drives home along the roads (no siren)
+    private void headHome() {
+        unit.headHome();
+        if (unit.goingHome()) {
+            drive(null, false);
+        }
+    }
+
+    // asks for the way to the leg's destination (null: home); without one the unit keeps the straight line
+    private void drive(Location destination, boolean emergency) {
+        Location to = destination != null ? destination : unit.home();
+        Optional<CityLink.Way> way = link.route(unit.position(), to, emergency);
+        if (way.isPresent() && way.get().points().size() >= 2) {
+            unit.follow(way.get().points(), way.get().seconds());
         }
     }
 

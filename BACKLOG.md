@@ -23,6 +23,12 @@ Ordered roughly by priority inside each group.
 - [ ] **Still straight lines after R4.** The ring search itself (candidates by km), the support search radius (the
       primary's km) and the `Preemptor` still compare straight-line distance. Fine while the nearest five by km
       contain the fastest by road; revisit if a river or highway makes that false.
+- [ ] **Re-route mid-leg.** A unit keeps the route it was given; a closure or jam added while it drives only affects
+      legs planned afterwards. Re-plan the legs whose remaining route crosses a new incident (and tell the crew).
+- [ ] **Store each trip's route.** The crew and the map ask `/api/route` separately (same answer in practice). When
+      real crew apps exist, keep the route they follow on the trip and draw that.
+- [ ] **Incidents are in memory and open.** Lost on restart; anyone who can reach the service can add one. Persist
+      them and put them behind the operator role (security piece).
 - [ ] **Queue aging.** Low-urgency cases can wait forever if worse ones keep arriving. Let waiting time slowly raise
       a case's priority.
 - [ ] **Hysteresis in `CaseManager`.** A patient hovering at a band boundary can flip band on every reading

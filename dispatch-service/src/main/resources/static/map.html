@@ -7,7 +7,9 @@
 <!--
   The live map: a viewer for the service's live feed (GET /api/live, a full picture every second), drawn on
   OpenStreetMap streets with Leaflet. Served by Spring Boot from static/, so it needs no controller.
-  Everything shown comes from the feed; nothing here changes anything in the service.
+  Everything shown comes from the feed, plus two read-only questions: the way by road for each trip
+  (GET /api/route, asked once per trip leg, the same question the simulated crew asks, so both get the same line)
+  and the incidents on the roads (GET /api/incidents, every 5 seconds). Nothing here changes anything in the service.
 
   Safety: names and phone numbers come from the API, so they are always inserted as TEXT (textContent), never as
   HTML: a name like "<script>" must show as those characters, not run.
@@ -106,6 +108,9 @@
     <div><span class="swatch" style="background:var(--offline)"></span>unit offline</div>
     <div><span class="swatch" style="background:var(--hospital);border-radius:3px"></span>hospital (grey: diversion)</div>
     <div><span class="swatch" style="background:var(--clinic)"></span>clinic</div>
+    <div><span class="swatch" style="background:#2f6fde;border-radius:2px;height:4px"></span>route still to drive (red: patient on board)</div>
+    <div><span class="swatch" style="background:rgba(240,124,0,.35);border:2px solid #f07c00"></span>traffic jam</div>
+    <div><span class="swatch" style="background:rgba(214,40,40,.35);border:2px solid #d62828"></span>road closed</div>
   </div>
 </aside>
 
@@ -122,6 +127,10 @@
   const caseMarkers = new Map();
   const unitMarkers = new Map();
   const tripLines = new Map();
+  const incidentCircles = new Map();
+  // the way by road per trip leg ("trip|patient" or "trip|hospital"): { points, next } once fetched; points null
+  // while the question is out or if there was no answer (then the straight line is drawn)
+  const routes = new Map();
   let fitted = false;
 
   const UNIT_LABEL = { AMBULANCE_ALS: 'ALS', AMBULANCE_BLS: 'BLS', NURSE: 'N', DOCTOR: 'D', COURIER: 'C' };
@@ -221,14 +230,18 @@
     }
     prune(unitMarkers, units);
 
-    // trips: a line from the unit to where it is going (the patient, or the hospital while transporting)
+    // trips: the road still ahead of the unit, to where it is going (the patient, or the hospital while transporting)
     const tripIds = new Set();
+    const legKeys = new Set();
     for (const t of s.activeTrips) {
       const unit = units.get(t.unitId);
       const target = t.status === 'TRANSPORTING' ? facilities.get(t.hospitalId) : cases.get(t.caseId);
       if (!unit || !target) continue;
       tripIds.add(t.id);
-      const points = [[unit.latitude, unit.longitude], [target.latitude, target.longitude]];
+      const key = t.id + '|' + (t.status === 'TRANSPORTING' ? 'hospital' : 'patient');
+      legKeys.add(key);
+      if (!routes.has(key)) askRoute(key, unit, target);
+      const points = ahead(routes.get(key), [unit.latitude, unit.longitude], [target.latitude, target.longitude]);
       const style = { color: TRIP_COLOUR[t.status] || '#2f6fde', weight: 3, opacity: 0.8,
                       dashArray: t.role === 'SUPPORT' ? '6 6' : null };
       let line = tripLines.get(t.id);
@@ -241,6 +254,9 @@
       }
     }
     prune(tripLines, tripIds);
+    for (const key of routes.keys()) {
+      if (!legKeys.has(key)) routes.delete(key);              // the leg is over
+    }
 
     // the side panel
     const count = (list, test) => list.filter(test).length;
@@ -262,6 +278,67 @@
       fitted = true;
     }
   }
+
+  // asks the service once for this leg's way by road, from where the unit is now (siren on, like the crew)
+  function askRoute(key, unit, target) {
+    const leg = { points: null, next: 0 };
+    routes.set(key, leg);
+    const q = new URLSearchParams({ fromLat: unit.latitude, fromLon: unit.longitude,
+                                    toLat: target.latitude, toLon: target.longitude, emergency: true });
+    fetch('/api/route?' + q)
+      .then(r => r.ok ? r.json() : null)
+      .then(answer => { if (answer) leg.points = answer.points; })
+      .catch(() => {});                                       // no answer: the straight line stays
+  }
+
+  // the part of the route still ahead: from the unit, through the route points after the one it is nearest to.
+  // The search only moves forward, so a road that passes near itself cannot make the line jump back.
+  function ahead(leg, unitPoint, targetPoint) {
+    if (!leg || !leg.points) return [unitPoint, targetPoint];
+    const pts = leg.points;
+    const cos = Math.cos(unitPoint[0] * Math.PI / 180);
+    let best = leg.next, bestDist = Infinity;
+    for (let i = leg.next; i < pts.length; i++) {
+      const dLat = pts[i][0] - unitPoint[0], dLon = (pts[i][1] - unitPoint[1]) * cos;
+      const d = dLat * dLat + dLon * dLon;
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    leg.next = best;
+    return [unitPoint, ...pts.slice(best + 1)];
+  }
+
+  // ---- incidents on the roads: circles, red when closed, orange for a jam ----
+  function renderIncidents(list) {
+    const seen = new Set();
+    for (const i of list) {
+      seen.add(i.id);
+      const closed = i.speedFactor === 0;
+      const style = { color: closed ? '#d62828' : '#f07c00', fillOpacity: 0.25, weight: 2 };
+      let circle = incidentCircles.get(i.id);
+      if (!circle) {
+        circle = L.circle([i.centre.latitude, i.centre.longitude], { ...style, radius: i.radiusMetres }).addTo(map);
+        incidentCircles.set(i.id, circle);
+      } else {
+        circle.setLatLng([i.centre.latitude, i.centre.longitude]);
+        circle.setRadius(i.radiusMetres);
+        circle.setStyle(style);
+      }
+      circle.bindPopup(popup(i.id, [
+        closed ? 'Road closed' : 'Traffic jam: ' + Math.round(i.speedFactor * 100) + '% of normal speed',
+        Math.round(i.radiusMetres) + ' m around'
+      ]));
+    }
+    prune(incidentCircles, seen);
+  }
+
+  function pollIncidents() {
+    fetch('/api/incidents')
+      .then(r => r.ok ? r.json() : null)
+      .then(list => { if (list) renderIncidents(list); })
+      .catch(() => {});
+  }
+  pollIncidents();
+  setInterval(pollIncidents, 5000);
 
   let hospitalsShown = '';
 
