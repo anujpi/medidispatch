@@ -13,8 +13,11 @@
 
   Safety: names and phone numbers come from the API, so they are always inserted as TEXT (textContent), never as
   HTML: a name like "<script>" must show as those characters, not run.
-  ponytail: OpenStreetMap's public tile servers are fine for development and a demo (light use, credited);
-  production needs its own tile server or a paid provider. No login yet, like the rest of the API (BACKLOG).
+  Map styles (top right): Streets (OpenStreetMap), Plain and Dark (Esri's light and dark grey canvas), Satellite (Esri
+  World Imagery), each with the credit it requires; layer toggles for each kind of marker. Both choices are
+  remembered in this browser (localStorage).
+  ponytail: these public tile servers are fine for development and a demo (light use, credited); production needs
+  its own tile server or a paid provider. No login yet, like the rest of the API (BACKLOG).
 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
@@ -54,19 +57,20 @@
   /* markers (Leaflet divIcons: plain HTML, styled here) */
   /* every icon is centred on its point (iconSize null puts the icon's top-left corner there) */
   .facility { display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700;
-              border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); transform: translate(-50%, -50%); }
-  .facility.hospital { width: 26px; height: 26px; border-radius: 6px; background: var(--hospital); font-size: 14px; }
+              border: 2px solid #fff; outline: 1px solid rgba(0,0,0,.6); box-shadow: 0 1px 5px rgba(0,0,0,.6);
+              transform: translate(-50%, -50%); }
+  .facility.hospital { width: 34px; height: 34px; border-radius: 8px; background: var(--hospital); font-size: 18px; }
   .facility.hospital.diverting { background: #7d7d7d; }
-  .facility.clinic { width: 20px; height: 20px; border-radius: 50%; background: var(--clinic); font-size: 11px; }
-  .case { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px rgba(0,0,0,.6);
-          transform: translate(-50%, -50%); }
+  .facility.clinic { width: 26px; height: 26px; border-radius: 50%; background: var(--clinic); font-size: 15px; }
+  .case { width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; outline: 1px solid rgba(0,0,0,.6);
+          box-shadow: 0 0 5px rgba(0,0,0,.7); transform: translate(-50%, -50%); }
   .case.MEDIUM { background: var(--medium); } .case.HIGH { background: var(--high); }
   .case.CRITICAL { background: var(--critical); } .case.LOW { background: var(--low); }
   .case.waiting { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { scale: 1.5; } }                   /* "scale", so the centring transform stays */
-  .unit { padding: 1px 4px; border-radius: 4px; color: #fff; font-size: 10px; font-weight: 700;
-          border: 1px solid rgba(255,255,255,.8); white-space: nowrap; transform: translate(-50%, -50%);
-          display: inline-block; }
+  .unit { padding: 2px 6px; border-radius: 5px; color: #fff; font-size: 12px; font-weight: 700;
+          border: 2px solid #fff; outline: 1px solid rgba(0,0,0,.6); box-shadow: 0 1px 4px rgba(0,0,0,.6);
+          white-space: nowrap; transform: translate(-50%, -50%); display: inline-block; }
   .unit.AVAILABLE { background: var(--available); } .unit.ASSIGNED { background: var(--assigned); }
   .unit.OFFLINE { background: var(--offline); }
   .popup b { display: block; margin-bottom: 2px; }
@@ -115,12 +119,49 @@
 </aside>
 
 <script>
-  // ---- the map: OpenStreetMap streets, starting over Bangalore ----
+  // ---- the map, starting over Bangalore ----
   const map = L.map('map').setView([12.97, 77.59], 12);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
+
+  // map styles: one is shown at a time
+  const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  // Plain and Dark are Esri's grey canvas maps (no labels, so the markers stand out); CARTO's free tiles now need an
+  // API key. The canvas maps stop at zoom 16, so closer in their tiles are enlarged (maxNativeZoom).
+  const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  const CANVAS = 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS user community';
+  const styles = {
+    'Streets': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM }),
+    'Plain': L.tileLayer(ESRI + 'Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                         { maxZoom: 19, maxNativeZoom: 16, attribution: CANVAS }),
+    'Dark': L.tileLayer(ESRI + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                        { maxZoom: 19, maxNativeZoom: 16, attribution: CANVAS }),
+    'Satellite': L.tileLayer(ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                             { maxZoom: 19, attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' })
+  };
+
+  // what is drawn, one group per kind, so each can be switched off while it keeps updating
+  const facilityGroup = L.layerGroup(), caseGroup = L.layerGroup(), unitGroup = L.layerGroup(),
+        routeGroup = L.layerGroup(), incidentGroup = L.layerGroup();
+  const overlays = { 'Hospitals and clinics': facilityGroup, 'Patients': caseGroup, 'Units': unitGroup,
+                     'Routes': routeGroup, 'Incidents': incidentGroup };
+
+  // remembered choices; storage can be missing or blocked (private windows), so every use is guarded
+  function load(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* not remembered, that is all */ }
+  }
+  const chosenStyle = load('medidispatch.style', 'Streets');
+  (styles[chosenStyle] || styles['Streets']).addTo(map);
+  const hidden = load('medidispatch.hidden', []);
+  for (const [name, group] of Object.entries(overlays)) {
+    if (!hidden.includes(name)) group.addTo(map);
+  }
+  L.control.layers(styles, overlays, { collapsed: false }).addTo(map);
+  map.on('baselayerchange', e => save('medidispatch.style', e.name));
+  map.on('overlayadd overlayremove', () => {
+    save('medidispatch.hidden', Object.keys(overlays).filter(name => !map.hasLayer(overlays[name])));
+  });
 
   // markers and lines by id, so each picture updates them in place instead of redrawing everything
   const facilityMarkers = new Map();
@@ -154,10 +195,10 @@
   }
 
   // creates the marker the first time an id is seen, moves and refreshes it after that
-  function upsert(store, id, latLng, html, className, data, popupFor) {
+  function upsert(store, group, id, latLng, html, className, data, popupFor) {
     let marker = store.get(id);
     if (!marker) {
-      marker = L.marker(latLng, { icon: L.divIcon({ html: '', className: '' }) }).addTo(map);
+      marker = L.marker(latLng, { icon: L.divIcon({ html: '', className: '' }) }).addTo(group);
       marker.bindPopup(() => popupFor(marker.data));
       store.set(id, marker);
     }
@@ -177,7 +218,7 @@
   function prune(store, seen) {
     for (const [id, layer] of store) {
       if (!seen.has(id)) {
-        map.removeLayer(layer);
+        layer.remove();                                       // from its group (and the map, if shown)
         store.delete(id);
       }
     }
@@ -198,7 +239,7 @@
     for (const f of s.facilities) {
       const hospital = f.kind === 'HOSPITAL';
       const cls = 'facility ' + (hospital ? 'hospital' : 'clinic') + (hospital && !f.accepting ? ' diverting' : '');
-      upsert(facilityMarkers, f.id, [f.latitude, f.longitude], hospital ? 'H' : '+', cls,
+      upsert(facilityMarkers, facilityGroup, f.id, [f.latitude, f.longitude], hospital ? 'H' : '+', cls,
         { ...f, inbound: inbound.get(f.id) || 0 },
         d => popup(d.name, [
           d.kind === 'HOSPITAL' ? (d.accepting ? 'Accepting patients' : 'ON DIVERSION') : 'Clinic (no emergency department)',
@@ -211,7 +252,7 @@
 
     for (const c of s.openCases) {
       const cls = 'case ' + c.band + (c.status === 'ALERTED' ? ' waiting' : '');
-      upsert(caseMarkers, c.id, [c.latitude, c.longitude], '', cls, c,
+      upsert(caseMarkers, caseGroup, c.id, [c.latitude, c.longitude], '', cls, c,
         d => popup(d.patientName ? d.patientName + ', ' + d.age + ' ' + (d.sex || '').charAt(0) : d.patientId, [
           d.band + ' - ' + d.status,
           'Patient ' + d.patientId,
@@ -221,7 +262,7 @@
     prune(caseMarkers, cases);
 
     for (const u of s.units) {
-      upsert(unitMarkers, u.id, [u.latitude, u.longitude], UNIT_LABEL[u.type] || '?', 'unit ' + u.status, u,
+      upsert(unitMarkers, unitGroup, u.id, [u.latitude, u.longitude], UNIT_LABEL[u.type] || '?', 'unit ' + u.status, u,
         d => popup(d.id + ' (' + d.type + ')', [
           d.status,
           d.driver ? 'Driver: ' + d.driver.name + ', ' + d.driver.phone : 'Driver: -',
@@ -242,11 +283,11 @@
       legKeys.add(key);
       if (!routes.has(key)) askRoute(key, unit, target);
       const points = ahead(routes.get(key), [unit.latitude, unit.longitude], [target.latitude, target.longitude]);
-      const style = { color: TRIP_COLOUR[t.status] || '#2f6fde', weight: 3, opacity: 0.8,
+      const style = { color: TRIP_COLOUR[t.status] || '#2f6fde', weight: 4, opacity: 0.85,
                       dashArray: t.role === 'SUPPORT' ? '6 6' : null };
       let line = tripLines.get(t.id);
       if (!line) {
-        line = L.polyline(points, style).addTo(map);
+        line = L.polyline(points, style).addTo(routeGroup);
         tripLines.set(t.id, line);
       } else {
         line.setLatLngs(points);
@@ -316,7 +357,7 @@
       const style = { color: closed ? '#d62828' : '#f07c00', fillOpacity: 0.25, weight: 2 };
       let circle = incidentCircles.get(i.id);
       if (!circle) {
-        circle = L.circle([i.centre.latitude, i.centre.longitude], { ...style, radius: i.radiusMetres }).addTo(map);
+        circle = L.circle([i.centre.latitude, i.centre.longitude], { ...style, radius: i.radiusMetres }).addTo(incidentGroup);
         incidentCircles.set(i.id, circle);
       } else {
         circle.setLatLng([i.centre.latitude, i.centre.longitude]);
@@ -360,6 +401,7 @@
       row.appendChild(node('span', 'tag ' + (h.accepting ? 'open' : 'diverting'), h.accepting ? 'open' : 'diversion'));
       row.addEventListener('click', () => {
         map.setView([h.latitude, h.longitude], 15);
+        if (!map.hasLayer(facilityGroup)) facilityGroup.addTo(map);   // a popup needs its marker on the map
         facilityMarkers.get(h.id).openPopup();
       });
       list.appendChild(row);

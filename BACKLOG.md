@@ -76,6 +76,16 @@ Ordered roughly by priority inside each group.
       (`GET /api/patients/{id}`), and drivers' phone numbers (in every unit view and the live feed). All synthetic
       today, but nothing stops anyone reading them until the security piece.
 
+## Simulator and dev map
+
+- [ ] **Simulator controls on the map.** Speed, pause and resume are typed commands in the simulator's console
+      (M1b); the user wanted buttons. The map only talks to the service, so the simulator would need a small HTTP
+      control endpoint (for example `POST /sim/speed`, `/sim/pause`, `/sim/resume` on its own port) and the map a
+      Speed / Pause / Resume bar that calls it (CORS, or proxy through the service). About 30 minutes.
+- [ ] **Pausing the city does not pause the service.** The service runs in real time, so crews on a trip time out
+      after about 30 s of pause. A service-side "simulation paused" switch would fix it; the real system never
+      pauses, so only if pausing becomes important.
+
 ## Small cleanups
 
 - [ ] Delete `engine/ResponseTypes.java` (unused since the response ladder).

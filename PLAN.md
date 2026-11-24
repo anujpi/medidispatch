@@ -21,7 +21,7 @@ and warns it before the patient arrives.
 | `dispatch-core` | pure-Java engine: scoring placeholder, cases, response ladder, ring search, claim, preemption, first responders, response upgrade, timeouts, trip monitoring, recovery, back in service |
 | `dispatch-sim` | seeded 2-hour simulation + endless threaded live city (`LiveSimulation`) |
 | `dispatch-sim-fx` | JavaFX window: live map, panel, report |
-| tests | 1003 (624 core, 95 sim, 22 fx, 184 service, 78 routing) |
+| tests | 1008 (624 core, 100 sim, 22 fx, 184 service, 78 routing) |
 | `dispatch-service` | Spring Boot app: `EngineConfig` wiring, `DispatchService` (one lock, 1 s dispatch loop, repeat-safe steps), REST API with ProblemDetail errors, SSE live feed (whole picture every second); on Postgres + PostGIS + TimescaleDB (JDBC adapters, JPA for trips, one transaction per call inside the lock, survives a restart). Hospitals and clinics: registry, destination choice, transport leg, V2 schema, endpoints, each hospital's fleet and inbound pre-alert |
 
 ---
@@ -209,7 +209,8 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
   - [x] R4: TravelTime port in core; dispatch ranking, hospital choice and ETA by drive time (road graph + traffic
         in the service, straight line when the graph file is missing)
   - [x] R5: route and incidents API; the simulator drives along routes; the map draws them and the incidents
-- [ ] M1b: map views (streets / plain / dark / satellite), layer toggles, bigger markers, live speed control
+- [x] M1b: map views (streets / plain / dark / satellite), layer toggles, bigger markers, live speed control
+      (console commands in the simulator; buttons on the map are in BACKLOG)
 - [ ] security moved up: login, roles, hospital scoping (L; it was in week 2)
 
 ### Week 2, Nov 26–Dec 2: the screens

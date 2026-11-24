@@ -527,6 +527,10 @@ class ApiTest {
         assertTrue(page.contains("tile.openstreetmap.org"), "the page must draw OpenStreetMap streets");
         assertTrue(page.contains("fetch('/api/route?'"), "trips are drawn along the roads");
         assertTrue(page.contains("fetch('/api/incidents')"), "incidents are drawn");
+        assertTrue(page.contains("L.control.layers(styles, overlays"), "styles and layers can be switched");
+        for (String style : new String[]{"'Streets'", "'Plain'", "'Dark'", "'Satellite'"}) {
+            assertTrue(page.contains(style), "map style " + style);
+        }
     }
 
     /** The tests run without the road graph: the route is the straight line at 40 km/h, start and end only. */

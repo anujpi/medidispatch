@@ -42,7 +42,7 @@ Vitals-driven emergency dispatch (simulation only, synthetic data). Full plan: P
   the real fix later is the outbox pattern.
 - Constructor injection everywhere; engine classes import ports and domain only, never InMemory adapters.
 
-## Built so far (1003 tests: 624 in dispatch-core, 95 in dispatch-sim, 22 in dispatch-sim-fx, 184 in dispatch-service,
+## Built so far (1008 tests: 624 in dispatch-core, 100 in dispatch-sim, 22 in dispatch-sim-fx, 184 in dispatch-service,
 78 in dispatch-routing)
 Domain: VitalsReading, RiskBand, RiskAssessment, Case/CaseStatus, Resource/ResourceStatus/ResourceType
 (AMBULANCE_ALS, AMBULANCE_BLS, NURSE, COURIER, DOCTOR; optional baseId = the facility it belongs to, optional
@@ -703,7 +703,7 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1, S2, M1 and routing R1-R5 are done. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+S1, S2, M1, routing R1-R5 and M1b are done; next the user wants to BUILD THE APPLICATION. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
 (map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
 console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
 only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
@@ -885,6 +885,22 @@ routes and the map draws them.
   to the unit, searching only FORWARD from `next` (a road passing near itself cannot make the line jump back),
   draws [unit, ...points after it]. Legs no longer active are forgotten. Incidents: GET /api/incidents every 5 s,
   L.circle per id (red closure, orange jam, popup), pruned. Legend: route, jam, closed.
+- M1b (map views): L.control.layers(styles, overlays, {collapsed: false}). Styles: Streets (OSM), Plain and Dark
+  (Esri Canvas World_Light_Gray_Base / World_Dark_Gray_Base, maxNativeZoom 16, no labels), Satellite (Esri
+  World_Imagery), each with its credit. CARTO was tried first: its free tiles now need an API key ("API KEY
+  REQUIRED" on every tile), found in the browser check. Overlays: one L.layerGroup each for Hospitals and clinics,
+  Patients, Units, Routes, Incidents; upsert() takes the group, prune() uses layer.remove(); hidden layers keep
+  updating. Choices remembered in localStorage ("medidispatch.style", "medidispatch.hidden"), every access in
+  try/catch. Clicking a hospital row re-adds the facilities group so the popup can open. Bigger markers (hospital
+  34 px, clinic 26, case 22, unit labels 12 px) with a dark outline for the satellite view; route lines 4 px.
+  Verified in the browser pane (Nov 24): all four styles 20/20 tiles, style remembered over a reload, Units toggle
+  hides and restores with markers still updating.
+- M1b (simulator speed): HttpSimulation.setSpeed(1..LiveSimulation.MAX_SPEED 300), pause(), resume(), speed(),
+  paused(); status() shows "x<speed>" or "PAUSED". HttpSimulatorMain: a daemon "console" thread reads stdin lines;
+  static command(line, city) (trimmed, case-insensitive): number = speed, p (warns: the service runs in real time,
+  crews on a trip time out after ~30 s), r, s, q (returns QUIT; main exits, the shutdown hook stops the city),
+  anything else = HELP. Typed in IntelliJ's Run window; NOT buttons on the map (the user expected buttons: a map
+  control bar is in BACKLOG). Tests: HttpSimulatorMainTest 5 (an HttpSimulation sends nothing until setUp).
 - Test: ApiTest.theLiveMapPageIsServed (200, listens to /api/live, uses OpenStreetMap tiles, fetches /api/route and
-  /api/incidents).
+  /api/incidents, has the layer switcher and the four styles).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.

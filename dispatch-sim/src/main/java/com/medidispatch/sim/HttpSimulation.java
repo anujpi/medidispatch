@@ -105,6 +105,38 @@ public final class HttpSimulation {
         }
     }
 
+    /**
+     * Changes how fast the city lives, from now on. What is sent to the service still carries real time.
+     *
+     * @param speed simulated seconds per real second, 1 to {@link LiveSimulation#MAX_SPEED}
+     * @throws IllegalArgumentException if the speed is out of range
+     */
+    public void setSpeed(int speed) {
+        if (speed < 1 || speed > LiveSimulation.MAX_SPEED) {
+            throw new IllegalArgumentException("speed must be 1 to " + LiveSimulation.MAX_SPEED + ", got " + speed);
+        }
+        clock.setSpeed(speed);
+    }
+
+    /**
+     * Freezes the city's time: nobody falls ill, nothing moves. The SERVICE keeps running in real time, so a crew on a
+     * trip that stops reporting for about 30 s is timed out by it (its signal check), as it would be for real.
+     */
+    public void pause() {
+        clock.pause();
+    }
+
+    /** Lets the city's time run again. */
+    public void resume() {
+        clock.resume();
+    }
+
+    /** @return simulated seconds per real second */
+    public int speed()       { return clock.speed(); }
+
+    /** @return {@code true} while paused */
+    public boolean paused()  { return clock.paused(); }
+
     /** Stops every thread. The simulation cannot be restarted. */
     public synchronized void stop() {
         agentPool.shutdownNow();
@@ -112,14 +144,15 @@ public final class HttpSimulation {
     }
 
     /**
-     * @return one line: simulated time so far, readings sent, trips seen, finished and taken to hospital, 409s and
+     * @return one line: simulated time so far, the speed (or PAUSED), readings sent, trips seen, finished and taken to hospital, 409s and
      *         errors
      */
     public String status() {
         Duration simulated = Duration.between(LiveSimulation.START, clock.instant());
         return String.format(
-                "sim +%dh%02dm | readings %d | trips %d seen, %d finished, %d to hospital | 409s %d | errors %d",
-                simulated.toHours(), simulated.toMinutesPart(), link.readings(), link.tripsSeen(),
+                "sim +%dh%02dm %s | readings %d | trips %d seen, %d finished, %d to hospital | 409s %d | errors %d",
+                simulated.toHours(), simulated.toMinutesPart(),
+                clock.paused() ? "PAUSED" : "x" + clock.speed(), link.readings(), link.tripsSeen(),
                 link.tripsFinished(), link.transported(), link.conflicts(), link.errors());
     }
 
