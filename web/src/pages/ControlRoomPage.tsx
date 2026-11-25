@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CircleCheck, Radio } from 'lucide-react'
 import type { CaseInfo, LiveSnapshot, RiskBand } from '../api/types'
 import { useLiveSnapshot } from '../api/useLiveSnapshot'
@@ -5,12 +6,13 @@ import { AppShell } from '../components/AppShell'
 import { ConnectionBadge } from '../components/ConnectionBadge'
 import { TriageTag } from '../components/TriageTag'
 import { CASE_STATUS, UNIT_TYPE, minutesBetween } from '../labels'
+import { LiveMap } from '../map/LiveMap'
+import { AlertsPanel } from '../control/AlertsPanel'
+import { CaseDetail } from '../control/CaseDetail'
+import { LATE_MINUTES, useAlerts } from '../control/alerts'
 import styles from './pages.module.css'
 
 const URGENCY: Record<RiskBand, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
-
-/** A critical case waiting longer than this without a unit is shown in red. */
-const LATE_MINUTES = 2
 
 // most urgent first, then the longest waiting
 function byUrgency(a: CaseInfo, b: CaseInfo): number {
@@ -18,12 +20,18 @@ function byUrgency(a: CaseInfo, b: CaseInfo): number {
 }
 
 /**
- * The control room: the dispatcher's overview. A strip of the numbers that matter, the open cases most urgent first
- * (how long each has waited, which unit is on it), and the fleet. Neutral by design: colour appears only where
- * something needs attention (urgency, a critical case left waiting). The map and the actions come in A2.
+ * The control room: the dispatcher's overview. A strip of the numbers that matter, the live map, the open cases
+ * most urgent first (how long each has waited, which unit is on it), the alerts, and the fleet. A case picked in
+ * the list, the map or an alert is marked on both and opens as a card over the map. Neutral by design: colour appears only where something needs
+ * attention (urgency, a critical case left waiting).
  */
 export function ControlRoomPage() {
   const { snapshot, connected } = useLiveSnapshot()
+  const [picked, setPicked] = useState<string | null>(null)
+  // a picked case that has since closed is simply no longer picked
+  const selectedCase = snapshot?.openCases.find((c) => c.id === picked) ?? null
+  const selected = selectedCase ? selectedCase.id : null
+  const alerts = useAlerts(snapshot)
 
   return (
     <AppShell app="Control room" wide headerEnd={<ConnectionBadge connected={connected} />}>
@@ -43,9 +51,21 @@ export function ControlRoomPage() {
       {snapshot && (
         <>
           <Metrics snapshot={snapshot} />
-          <div className={styles.grid}>
-            <Queue snapshot={snapshot} />
-            <Fleet snapshot={snapshot} />
+          <div className={styles.mapGrid}>
+            <div className={styles.stack}>
+              <section className={`${styles.panel} ${styles.mapPanel}`} aria-label="City map">
+                <LiveMap snapshot={snapshot} selectedCaseId={selected} onSelectCase={setPicked} />
+                {selectedCase && (
+                  <CaseDetail snapshot={snapshot} openCase={selectedCase} onClose={() => setPicked(null)} />
+                )}
+              </section>
+              <Fleet snapshot={snapshot} />
+            </div>
+            <div className={styles.stack}>
+              <AlertsPanel alerts={alerts.alerts} onAcknowledge={alerts.acknowledge}
+                           onAcknowledgeAll={alerts.acknowledgeAll} onSelectCase={setPicked} />
+              <Queue snapshot={snapshot} selected={selected} onSelect={setPicked} />
+            </div>
           </div>
         </>
       )}
@@ -81,7 +101,11 @@ function Metric({ label, value, of, alarm }: { label: string; value: number; of?
   )
 }
 
-function Queue({ snapshot }: { snapshot: LiveSnapshot }) {
+function Queue({ snapshot, selected, onSelect }: {
+  snapshot: LiveSnapshot
+  selected: string | null
+  onSelect: (caseId: string) => void
+}) {
   const cases = [...snapshot.openCases].sort(byUrgency)
   return (
     <section className={styles.panel} aria-labelledby="queue-title">
@@ -98,7 +122,7 @@ function Queue({ snapshot }: { snapshot: LiveSnapshot }) {
         </div>
       )}
       {cases.length > 0 && (
-        <table className={styles.table}>
+        <table className={`${styles.table} ${styles.tight}`}>
           <thead>
             <tr>
               <th>Priority</th>
@@ -114,10 +138,15 @@ function Queue({ snapshot }: { snapshot: LiveSnapshot }) {
               const waited = minutesBetween(c.openedAt, snapshot.at)
               const late = c.band === 'CRITICAL' && c.status === 'ALERTED' && waited >= LATE_MINUTES
               return (
-                <tr key={c.id} className={c.band === 'CRITICAL' ? styles.critical : ''}>
+                <tr key={c.id} onClick={() => onSelect(c.id)}
+                    className={`${styles.clickable} ${c.band === 'CRITICAL' ? styles.critical : ''} ${
+                      c.id === selected ? styles.selectedRow : ''}`}>
                   <td><TriageTag band={c.band} waiting={c.status === 'ALERTED'} /></td>
                   <td>
-                    <span className={styles.strong}>{c.patientName ?? c.patientId}</span>
+                    <button type="button" className={`${styles.rowButton} ${styles.strong}`}
+                            aria-pressed={c.id === selected}>
+                      {c.patientName ?? c.patientId}
+                    </button>
                     {c.age !== null && <span className={styles.detail}>{c.age}{c.sex ? ' ' + c.sex.charAt(0) : ''}</span>}
                   </td>
                   <td className={styles.hideSmall}>{CASE_STATUS[c.status]}</td>

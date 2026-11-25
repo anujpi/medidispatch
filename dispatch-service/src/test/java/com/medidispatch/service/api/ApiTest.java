@@ -601,4 +601,126 @@ class ApiTest {
                     .andExpect(status().isBadRequest());
         }
     }
+
+    // ---------- the dispatcher's overrides (A2c); each in its own city, so the background tick cannot mix them ----------
+
+    // registers a patient, sends a critical reading and returns the new case's id
+    private String criticalCase(String patientId, double latitude, double longitude) throws Exception {
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                .content(patient(patientId, latitude, longitude))).andExpect(status().isCreated());
+        String answer = http.perform(post("/api/readings").contentType(MediaType.APPLICATION_JSON)
+                        .content(criticalReading(patientId)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return JsonPath.read(answer, "$.openCase.id");
+    }
+
+    private void addUnit(String id, String type, double latitude, double longitude) throws Exception {
+        http.perform(post("/api/units").contentType(MediaType.APPLICATION_JSON)
+                .content(unit(id, type, latitude, longitude))).andExpect(status().isCreated());
+    }
+
+    private static String reason(String text) {
+        return "{\"reason\": \"%s\"}".formatted(text);
+    }
+
+    private static String send(String unitId, String text) {
+        return "{\"unitId\": \"%s\", \"reason\": \"%s\"}".formatted(unitId, text);
+    }
+
+    @Test
+    void aDispatcherCancelsACaseAndItsUnitIsFree() throws Exception {
+        addUnit("chennai-u1", "AMBULANCE_ALS", 13.0850, 80.2750);
+        String caseId = criticalCase("chennai-p1", 13.0827, 80.2707);
+        service.tick();
+        http.perform(get("/api/units/chennai-u1")).andExpect(jsonPath("$.status").value("ASSIGNED"));
+
+        http.perform(post("/api/cases/" + caseId + "/cancel").contentType(MediaType.APPLICATION_JSON)
+                        .content(reason("the son called, she is fine")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        http.perform(post("/api/cases/" + caseId + "/cancel").contentType(MediaType.APPLICATION_JSON)
+                        .content(reason("again")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        http.perform(get("/api/units/chennai-u1")).andExpect(jsonPath("$.status").value("AVAILABLE"));
+        http.perform(post("/api/cases/no-such-case/cancel").contentType(MediaType.APPLICATION_JSON)
+                .content(reason("why"))).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void anOverrideWithoutAReasonIs400() throws Exception {
+        String[] bad = {"{}", "{\"reason\": \" \"}", "{\"reason\": \"" + "x".repeat(201) + "\"}"};
+        for (String body : bad) {
+            http.perform(post("/api/cases/any/cancel").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+            http.perform(post("/api/units/any/out-of-service").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+        }
+        http.perform(post("/api/cases/any/send").contentType(MediaType.APPLICATION_JSON).content(reason("no unit")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void aDispatcherSendsAnotherUnitInsteadOfTheEnginesChoice() throws Exception {
+        addUnit("kolkata-near", "AMBULANCE_ALS", 22.5730, 88.3640);
+        addUnit("kolkata-far", "AMBULANCE_ALS", 22.6200, 88.4000);
+        addUnit("kolkata-nurse", "NURSE", 22.6000, 88.3639);        // farther than the ambulance: not sent as a first responder
+        String caseId = criticalCase("kolkata-p1", 22.5726, 88.3639);
+        service.tick();
+        http.perform(get("/api/units/kolkata-near")).andExpect(jsonPath("$.status").value("ASSIGNED"));
+
+        // a nurse cannot carry a critical patient to hospital
+        http.perform(post("/api/cases/" + caseId + "/send").contentType(MediaType.APPLICATION_JSON)
+                        .content(send("kolkata-nurse", "closest")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("send one of: AMBULANCE_ALS, AMBULANCE_BLS")));
+
+        String trip = http.perform(post("/api/cases/" + caseId + "/send").contentType(MediaType.APPLICATION_JSON)
+                        .content(send("kolkata-far", "near crew is new")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.unitId").value("kolkata-far"))
+                .andExpect(jsonPath("$.role").value("PRIMARY"))
+                .andReturn().getResponse().getContentAsString();
+        String tripId = JsonPath.read(trip, "$.id");
+        http.perform(post("/api/cases/" + caseId + "/send").contentType(MediaType.APPLICATION_JSON)
+                        .content(send("kolkata-far", "again")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(tripId));
+
+        http.perform(get("/api/units/kolkata-near")).andExpect(jsonPath("$.status").value("AVAILABLE"));
+        http.perform(get("/api/cases/" + caseId)).andExpect(jsonPath("$.status").value("RESPONDING"));
+        http.perform(post("/api/cases/" + caseId + "/send").contentType(MediaType.APPLICATION_JSON)
+                .content(send("no-such-unit", "why"))).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aUnitTakenOutOfServiceIsReplacedAndCanComeBack() throws Exception {
+        addUnit("hyderabad-u1", "AMBULANCE_ALS", 17.3860, 78.4870);
+        addUnit("hyderabad-u2", "AMBULANCE_ALS", 17.4400, 78.5200);
+        String caseId = criticalCase("hyderabad-p1", 17.3850, 78.4867);
+        service.tick();
+        http.perform(get("/api/units/hyderabad-u1")).andExpect(jsonPath("$.status").value("ASSIGNED"));
+
+        http.perform(post("/api/units/hyderabad-u1/out-of-service").contentType(MediaType.APPLICATION_JSON)
+                        .content(reason("flat tyre")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OFFLINE"));
+        http.perform(post("/api/units/hyderabad-u1/out-of-service").contentType(MediaType.APPLICATION_JSON)
+                        .content(reason("again")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OFFLINE"));
+
+        service.tick();                                 // the case waits again, and the next-best unit is sent
+        http.perform(get("/api/units/hyderabad-u2/trip"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value(caseId));
+
+        http.perform(post("/api/units/hyderabad-u1/back-in-service"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
+        http.perform(post("/api/units/no-such-unit/out-of-service").contentType(MediaType.APPLICATION_JSON)
+                .content(reason("why"))).andExpect(status().isNotFound());
+    }
 }

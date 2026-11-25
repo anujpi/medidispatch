@@ -6,15 +6,11 @@ import { usePolling } from '../api/usePolling'
 import { AppShell } from '../components/AppShell'
 import { ErrorPanel } from '../components/ErrorPanel'
 import { TriageTag } from '../components/TriageTag'
-import { UNIT_TYPE } from '../labels'
+import { UNIT_TYPE, NEED } from '../labels'
 import styles from './pages.module.css'
 
 /** How often the pre-alert is asked for again. */
 const HOSPITAL_POLL_MS = 5_000
-
-const NEED: Record<string, string> = {
-  CARDIAC: 'Cardiac', STROKE: 'Stroke', TRAUMA: 'Trauma', PAEDIATRIC: 'Paediatric',
-}
 
 /**
  * A hospital's panel: who it is, whether it accepts patients, and the arrivals (patients on the way in, soonest
@@ -54,7 +50,7 @@ export function HospitalPage() {
               )}
               {hospital.capabilities.length > 0 && (
                 <span className={styles.chips} aria-label="Specialties">
-                  {hospital.capabilities.map((c) => <span key={c} className={styles.chip}>{NEED[c] ?? c}</span>)}
+                  {hospital.capabilities.map((c) => <span key={c} className={styles.chip}>{NEED[c]}</span>)}
                 </span>
               )}
             </div>
@@ -96,7 +92,7 @@ export function HospitalPage() {
                         {p.age !== null && <span className={styles.detail}>{p.age}{p.sex ? ' ' + p.sex.charAt(0) : ''}</span>}
                       </td>
                       <td className={styles.hideSmall}>
-                        {p.needs.length ? p.needs.map((n) => NEED[n] ?? n).join(', ') : <span className={styles.muted}>None</span>}
+                        {p.needs.length ? p.needs.map((n) => NEED[n]).join(', ') : <span className={styles.muted}>None</span>}
                       </td>
                       <td className={styles.hideSmall}>
                         <span className={styles.strong}>{p.unitId}</span>

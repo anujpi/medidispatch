@@ -1,4 +1,4 @@
-import type { CaseStatus, ResourceType, RiskBand, TripStatus } from './api/types'
+import type { Capability, CaseStatus, ResourceType, RiskBand, TripStatus } from './api/types'
 
 /**
  * The service's enum values in the words a dispatcher or a nurse uses. The screens never show raw enum names
@@ -39,6 +39,20 @@ export const UNIT_TYPE: Record<ResourceType, string> = {
   NURSE: 'Nurse',
   DOCTOR: 'Doctor',
   COURIER: 'Courier',
+}
+
+export const NEED: Record<Capability, string> = {
+  CARDIAC: 'Cardiac',
+  STROKE: 'Stroke',
+  TRAUMA: 'Trauma',
+  PAEDIATRIC: 'Paediatric',
+}
+
+const CLOCK = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })
+
+/** "13:05": a time of day in Bengaluru, wherever the browser is. */
+export function clockTime(iso: string): string {
+  return CLOCK.format(new Date(iso))
 }
 
 /** "Asha Rao, 68 F" (or the id for an anonymous patient). */

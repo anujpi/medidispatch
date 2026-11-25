@@ -6,6 +6,7 @@ import com.medidispatch.core.engine.DestinationChooser;
 import com.medidispatch.core.engine.DispatchCoordinator;
 import com.medidispatch.core.engine.Dispatcher;
 import com.medidispatch.core.engine.Preemptor;
+import com.medidispatch.core.engine.OperatorOverrides;
 import com.medidispatch.core.engine.ResponseRecovery;
 import com.medidispatch.core.engine.ResponseUpgrader;
 import com.medidispatch.core.engine.StraightLineTravelTime;
@@ -239,6 +240,19 @@ public class EngineConfig {
     @Bean
     ResponseRecovery responseRecovery(AssignmentManager assignmentManager, CaseManager caseManager) {
         return new ResponseRecovery(assignmentManager, caseManager);
+    }
+
+    /**
+     * @return what a dispatcher can do over the engine's head: cancel a case, send a unit, take one out of service
+     */
+    @Bean
+    OperatorOverrides operatorOverrides(CaseRepository cases, CaseQueue queue, CaseManager caseManager,
+                                        AssignmentRepository assignments, AssignmentManager assignmentManager,
+                                        ResponseRecovery recovery, ResourceRepository resources,
+                                        ResourceClaimer claimer, PatientRepository patients,
+                                        ResponseDecider decider, EventPublisher events, Clock clock) {
+        return new OperatorOverrides(cases, queue, caseManager, assignments, assignmentManager, recovery,
+                resources, claimer, patients, decider, events, clock);
     }
 
     /**

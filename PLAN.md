@@ -216,7 +216,8 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
 ### Week 2, Nov 26–Dec 2: the screens
 - [x] A1: React + TS + Vite app (web/), routes for the four faces, API client, live feed hook, three colour
       themes, first read-only screens (F); CORS avoided with Vite's dev proxy
-- [ ] control room: map, queue, alerts, override, live via SSE (F for the UI, L for the live data)
+- [x] control room: map, queue, alerts, override, live via SSE (A2a map, A2b alerts + case card, A2c operator
+      overrides: cancel a case, send a chosen unit, take a unit out of service)
 - [ ] OTP login, JWT, roles (L)
 - [ ] crew PWA: manifest, service worker, trip flow, GPS, vitals, quick messages (F) — TLS on the LAN lesson (L)
 - [ ] hospital panel: incoming, ETA, vitals, SBAR (F)

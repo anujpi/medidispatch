@@ -9,12 +9,15 @@ import com.medidispatch.core.domain.Contact;
 import com.medidispatch.core.domain.Facility;
 import com.medidispatch.core.domain.Location;
 import com.medidispatch.core.domain.Patient;
+import com.medidispatch.core.domain.CaseStatus;
 import com.medidispatch.core.domain.Resource;
+import com.medidispatch.core.domain.ResourceStatus;
 import com.medidispatch.core.domain.ResourceType;
 import com.medidispatch.core.domain.VitalsReading;
 import com.medidispatch.core.engine.AssignmentManager;
 import com.medidispatch.core.engine.CaseManager;
 import com.medidispatch.core.engine.DispatchCoordinator;
+import com.medidispatch.core.engine.OperatorOverrides;
 import com.medidispatch.core.engine.ProcessingResult;
 import com.medidispatch.core.engine.StraightLineTravelTime;
 import com.medidispatch.core.engine.TimeoutMonitor;
@@ -32,6 +35,9 @@ import com.medidispatch.core.port.VitalsRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -83,6 +89,9 @@ public class DispatchService {
     private final TravelTime travel;
     private final Clock clock;
     private final TransactionTemplate tx;
+    private final OperatorOverrides overrides;
+
+    private static final Logger log = LoggerFactory.getLogger(DispatchService.class);
 
     /**
      * Spring calls this constructor and passes in the engine parts built by {@link EngineConfig}.
@@ -104,13 +113,15 @@ public class DispatchService {
      * @param travel            travel times, for the pre-alert ETA (by road when the graph is there)
      * @param clock             the engine's clock, used to timestamp snapshots
      * @param tx                runs a piece of work as one database transaction (created by Boot)
+     * @param overrides         what a dispatcher can do over the engine's head (cancel, send, out of service)
      */
     public DispatchService(PatientRepository patients, ResourceRepository resources, CaseRepository cases,
                            AssignmentRepository assignments, VitalsProcessor processor, CaseManager caseManager,
                            AssignmentManager assignmentManager, UnitTracker unitTracker,
                            DispatchCoordinator coordinator, TimeoutMonitor timeoutMonitor, TripMonitor tripMonitor,
                            FacilityRepository facilities, TransportCoordinator transport, VitalsRepository vitals,
-                           TravelTime travel, Clock clock, TransactionTemplate tx) {
+                           TravelTime travel, Clock clock, TransactionTemplate tx,
+                           OperatorOverrides overrides) {
         this.patients = patients;
         this.resources = resources;
         this.cases = cases;
@@ -128,6 +139,7 @@ public class DispatchService {
         this.travel = travel;
         this.clock = clock;
         this.tx = tx;
+        this.overrides = overrides;
     }
 
     /**
@@ -304,6 +316,87 @@ public class DispatchService {
             requireUnit(unitId);
             unitTracker.onBackInService(unitId);
             return UnitInfo.from(resources.findById(unitId).orElseThrow());
+        });
+    }
+
+    /**
+     * A dispatcher calls the case off (a false alarm, the patient is fine): every unit on it is freed and the case is
+     * CANCELLED. If the readings stay bad, the next one opens a new case.
+     *
+     * <p>Safe to repeat: an already cancelled case is returned unchanged.
+     *
+     * @param caseId the case
+     * @param reason why, for the record
+     * @return the cancelled case
+     * @throws NotFoundException        if there is no such case
+     * @throws IllegalArgumentException if the reason is blank
+     * @throws IllegalStateException    if the patient is on the way to hospital, or the case is stabilised or closed
+     */
+    public synchronized CaseInfo cancelCase(String caseId, String reason) {
+        return tx.execute(status -> {
+            Case c = requireCase(caseId);
+            if (c.status() == CaseStatus.CANCELLED) {
+                return caseInfo(c);
+            }
+            Case cancelled = overrides.cancelCase(caseId, reason);
+            log.info("Override: case {} cancelled ({})", caseId, reason);
+            return caseInfo(cancelled);
+        });
+    }
+
+    /**
+     * A dispatcher sends the unit of their choice to a case, replacing the unit the engine sent if it has not
+     * reached the patient yet.
+     *
+     * <p>Safe to repeat: if this unit is already the case's main unit, its trip is returned unchanged.
+     *
+     * @param caseId the case
+     * @param unitId the unit to send
+     * @param reason why, for the record
+     * @return the unit's trip
+     * @throws NotFoundException        if there is no such case or unit
+     * @throws IllegalArgumentException if the reason is blank
+     * @throws IllegalStateException    if the unit is not free or cannot serve the case, the case is not waiting or
+     *                                  responding, or the current unit is already on scene
+     */
+    public synchronized TripInfo sendUnit(String caseId, String unitId, String reason) {
+        return tx.execute(status -> {
+            requireCase(caseId);
+            requireUnit(unitId);
+            for (Assignment a : assignments.findActiveByCaseId(caseId)) {
+                if (a.role() == AssignmentRole.PRIMARY && a.resourceId().equals(unitId)) {
+                    return TripInfo.from(a);
+                }
+            }
+            Assignment sent = overrides.sendUnit(caseId, unitId, reason);
+            log.info("Override: {} sent to case {} ({})", unitId, caseId, reason);
+            return TripInfo.from(sent);
+        });
+    }
+
+    /**
+     * A dispatcher takes a unit off duty (breakdown, crew unwell). If it was on a trip, the trip fails and the case
+     * waits for the next-best unit. {@link #backInService(String)} undoes it.
+     *
+     * <p>Safe to repeat: an already offline unit is returned unchanged.
+     *
+     * @param unitId the unit
+     * @param reason why, for the record
+     * @return the unit, OFFLINE
+     * @throws NotFoundException        if there is no such unit
+     * @throws IllegalArgumentException if the reason is blank
+     * @throws IllegalStateException    if the unit is carrying a patient
+     */
+    public synchronized UnitInfo takeOutOfService(String unitId, String reason) {
+        return tx.execute(status -> {
+            requireUnit(unitId);
+            Resource unit = resources.findById(unitId).orElseThrow();
+            if (unit.status() == ResourceStatus.OFFLINE) {
+                return UnitInfo.from(unit);
+            }
+            Resource offline = overrides.takeOutOfService(unitId, reason);
+            log.info("Override: {} taken out of service ({})", unitId, reason);
+            return UnitInfo.from(offline);
         });
     }
 
@@ -595,6 +688,10 @@ public class DispatchService {
             throw new NotFoundException("Facility " + facilityId + " not found");
         }
         return facility.get();
+    }
+
+    private Case requireCase(String caseId) {
+        return cases.findById(caseId).orElseThrow(() -> new NotFoundException("Case " + caseId + " not found"));
     }
 
     private Assignment requireTrip(String tripId) {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRoutes } from '../routes'
 import { FakeEventSource, fakeFetch, sampleSnapshot } from '../test/fakes'
 import type { FacilityInfo, InboundPatient } from '../api/types'
+import { routeQuery } from '../map/routes'
 
 // renders the whole app at one address, the way the browser would open it
 function openAt(path: string) {
@@ -101,6 +102,76 @@ describe('the control room', () => {
     expect(fleet[0]).toHaveTextContent('als-1')
     expect(fleet[0]).toHaveTextContent('On a trip')
     expect(fleet[1]).toHaveTextContent('Free')
+  })
+
+  it('shows the city on a map: a dot per case, a square per unit, a cross per hospital', () => {
+    const { container } = openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    const snapshot = sampleSnapshot()
+    expect(screen.getByRole('region', { name: 'City map' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.leaflet-marker-icon')).toHaveLength(
+      snapshot.openCases.length + snapshot.units.length + snapshot.facilities.length)
+  })
+
+  it('picks a case from the list', () => {
+    openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    const asha = screen.getByRole('button', { name: 'Asha Rao' })
+    expect(asha).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(asha)
+
+    expect(asha).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Meena Iyer' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('a picked case opens as a card: the patient, the unit, its drive time and its driver', async () => {
+    const eta = '/api/route?' + routeQuery([12.93, 77.62], [12.94, 77.61])     // als-1 to Asha Rao
+    vi.stubGlobal('fetch', fakeFetch({ [eta]: [200, { seconds: 400, metres: 3000, points: [] }] }))
+    openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Asha Rao' }))
+
+    const card = within(screen.getByRole('complementary', { name: 'Asha Rao' }))
+    expect(card.getByText('68, female')).toBeInTheDocument()
+    expect(card.getByText('Unit on the way')).toBeInTheDocument()
+    expect(card.getByText('als-1')).toBeInTheDocument()
+    expect(card.getByText('En route')).toBeInTheDocument()
+    expect(card.getByRole('link', { name: /Ravi Kumar/ })).toHaveAttribute('href', 'tel:+91 90000 00001')
+    expect(await card.findByTitle('Estimated drive time')).toHaveTextContent('7min')     // 400 s, rounded up
+
+    fireEvent.click(card.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+  })
+
+  it('raises an alert when a unit goes offline, until it is acknowledged', () => {
+    openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+    expect(section('Alerts').getByText('No alerts. New ones appear here.')).toBeInTheDocument()
+
+    const offline = sampleSnapshot()
+    offline.at = '2026-11-24T13:00:01Z'
+    offline.units[1].status = 'OFFLINE'
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(offline)))
+
+    expect(section('Alerts').getByText('bls-1 went offline')).toBeInTheDocument()
+    fireEvent.click(section('Alerts').getByRole('button', { name: 'Acknowledge: bls-1 went offline' }))
+    expect(section('Alerts').getByText('No alerts. New ones appear here.')).toBeInTheDocument()
+  })
+
+  it('an alert about a case opens that case', () => {
+    openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+    const worse = sampleSnapshot()
+    worse.at = '2026-11-24T13:00:01Z'
+    worse.openCases[0].band = 'CRITICAL'
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(worse)))
+
+    fireEvent.click(section('Alerts').getByRole('button', { name: 'Meena Iyer is critical' }))
+
+    expect(screen.getByRole('complementary', { name: 'Meena Iyer' })).toBeInTheDocument()
   })
 })
 

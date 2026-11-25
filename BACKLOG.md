@@ -95,6 +95,31 @@ Ordered roughly by priority inside each group.
 - [ ] **Cream theme: "High" is close to the accent.** The high-priority orange and the burnt-orange accent are
       similar; shift one if it confuses anyone.
 
+## Control room and overrides
+
+- [ ] **Investigate: an override undone 3 seconds later (seen once, Nov 25).** On the live city a dispatcher's
+      "send nurse-4" to a MEDIUM case (19:10:53 IST, 200 OK) was cancelled at 19:10:56 and the engine sent nurse-5
+      (the unit it had just replaced) to the same case again. The case's first unit, nurse-1, had failed shortly
+      before (a simulator-injected breakdown), and nurse-5 was the engine's re-dispatch. No other case got a unit
+      that minute, and the only code that cancels a trip and requeues on its own is the preemptor, which would mean
+      the case was still in the queue while RESPONDING. Two later overrides (one watched in the database every
+      0.5 s for 30 s) held. Next step: reproduce with the service log open (look for "Override:" lines and anything
+      between them and the cancel), or a core test: a case whose primary failed, re-dispatched, then overridden,
+      then several dispatch rounds.
+- [ ] **A quiet period after a cancel.** A cancelled case whose patient's readings stay bad reopens on the next
+      reading (honest, but noisy for a known false alarm). A per-patient "ignore for N minutes" set by the
+      dispatcher would stop it.
+- [ ] **Take a busy unit from another case.** The dispatcher can only send a free unit; taking one from a less
+      urgent case (manual preemption) needs the victim case requeued, like the engine's own preemption.
+- [ ] **Eligible units from the server.** The "send another unit" list shows every free unit by straight-line
+      distance; the service refuses the wrong type. A `GET /api/cases/{id}/candidates` ranked by drive time would
+      list only the units that can serve the case.
+- [ ] **Audit trail.** Overrides are an event and a log line; who did it, and a stored record, come with the
+      login (SEC).
+- [ ] **Control room map: incidents and a legend.** The dev map (map.html) shows road incidents and a legend;
+      the control room's map has neither yet.
+- [ ] **Alert sound, vitals in the case card, "unit not answering" alerts.**
+
 ## Small cleanups
 
 - [ ] Delete `engine/ResponseTypes.java` (unused since the response ladder).

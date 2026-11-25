@@ -1,0 +1,312 @@
+/* The control room's own parts: the alerts list and the case card over the map. */
+
+.small {
+  height: 24px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.small:hover,
+.iconButton:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* ---- alerts ---- */
+.countAlarm {
+  background: var(--critical);
+  color: #fff;
+}
+
+/* a fixed height: new alerts never push the case list down under the cursor */
+.alertList {
+  height: 156px;
+  overflow-y: auto;
+}
+
+.alertList ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.noAlerts {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.alert {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 40px;
+  padding: 0 var(--s3) 0 var(--s5);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.critical { color: var(--critical); flex: none; }
+.warning { color: var(--high); flex: none; }
+
+.alertText {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.alertText {
+  cursor: pointer;
+}
+
+button.alertText:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.alertTime {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the case card, floating over the map's top right ---- */
+.detail {
+  position: absolute;
+  top: var(--s3);
+  right: var(--s3);
+  z-index: 1000;                 /* above Leaflet's panes and controls */
+  width: 340px;
+  max-width: calc(100% - 2 * var(--s3));
+  max-height: calc(100% - 2 * var(--s3));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s3) var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+
+.detailHead h2 {
+  font-size: var(--fs-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  margin-left: auto;
+}
+
+.detailFacts {
+  grid-template-columns: 96px 1fr;
+}
+
+.detailSub {
+  padding: var(--s3) var(--s5) var(--s1);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.detailNote {
+  padding: 0 var(--s5) var(--s4);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.units {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 var(--s2);
+}
+
+.unitRow {
+  display: grid;
+  gap: 2px;
+  padding: var(--s2) var(--s5);
+  font-size: var(--fs-sm);
+}
+
+.unitLine {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.eta {
+  margin-left: auto;
+}
+
+.unitMeta {
+  color: var(--text-2);
+}
+
+.driver {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-size: var(--fs-xs);
+}
+
+/* ---- the dispatcher's overrides ---- */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  padding: var(--s3) var(--s5) var(--s4);
+  border-top: 1px solid var(--line);
+}
+
+.actionForm .actions {
+  padding: 0;
+  border-top: none;
+}
+
+.actionForm {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3) var(--s5) var(--s4);
+  border-top: 1px solid var(--line);
+}
+
+.actionForm h3 {
+  font-size: var(--fs-sm);
+}
+
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s1);
+}
+
+.inlineForm .field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.field {
+  height: 30px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.field:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
+}
+
+.formNote {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.formError {
+  color: var(--critical);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.primary,
+.dangerSolid {
+  height: 28px;
+  padding: 0 var(--s3);
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.primary:hover {
+  background: var(--accent-hover);
+}
+
+/* the one irreversible action is red, and only once the dispatcher has chosen it */
+.dangerSolid {
+  background: var(--critical);
+  color: #fff;
+}
+
+.primary:disabled,
+.dangerSolid:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.danger {
+  color: var(--critical);
+}
+
+.link {
+  width: fit-content;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--critical);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

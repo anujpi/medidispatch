@@ -1,0 +1,141 @@
+/* The control room's map. Its markers and lines are coloured with the theme's own variables, so they switch with
+   the theme like everything else. Leaflet's own class names are global, hence :global(). */
+
+.map {
+  height: 100%;
+  min-height: 420px;
+  background: var(--bg);
+  font: inherit;
+}
+
+/* the base map is tinted towards the theme's background, so it sits behind the markers instead of competing */
+.map :global(.leaflet-tile-pane) {
+  opacity: 0.85;
+}
+
+:global([data-theme="navy"]) .map :global(.leaflet-tile-pane),
+:global([data-theme="charcoal"]) .map :global(.leaflet-tile-pane) {
+  opacity: 0.7;
+}
+
+/* ---- markers ---- */
+
+/* a case: a dot in its urgency's colour, the only colour on the map */
+.case {
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.CRITICAL { background: var(--critical); color: var(--critical); }
+.HIGH { background: var(--high); color: var(--high); }
+.MEDIUM { background: var(--medium); color: var(--medium); }
+.LOW { background: var(--low); color: var(--low); }
+
+/* still waiting for a unit: a ring pulses round it */
+.waiting {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 7px color-mix(in srgb, currentColor 30%, transparent); }
+}
+
+.selected {
+  border-color: var(--text);
+  border-width: 3px;
+}
+
+/* a unit: a small square, filled while on a trip */
+.unit {
+  border-radius: 3px;
+  background: var(--surface);
+  border: 2px solid var(--text-2);
+}
+
+.busy {
+  background: var(--busy);
+  border-color: var(--surface);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.offline {
+  border-style: dashed;
+  border-color: var(--muted);
+  opacity: 0.7;
+}
+
+/* a hospital or clinic: a cross */
+.facility {
+  color: var(--text-2);
+  filter: drop-shadow(0 0 1px var(--surface)) drop-shadow(0 0 1px var(--surface));
+}
+
+.facility svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.diverted {
+  opacity: 0.35;
+}
+
+/* ---- trip lines: to the patient in the busy colour, to the hospital in ink; a supporting unit dashed ---- */
+.trip {
+  stroke: var(--busy);
+  stroke-width: 3;
+  stroke-opacity: 0.85;
+  fill: none;
+}
+
+.toHospital {
+  stroke: var(--text-2);
+}
+
+.support {
+  stroke-dasharray: 6 6;
+}
+
+/* ---- Leaflet's own controls, in the theme ---- */
+.map :global(.leaflet-bar) {
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+}
+
+.map :global(.leaflet-bar a) {
+  background: var(--surface);
+  color: var(--text);
+  border-bottom-color: var(--line);
+}
+
+.map :global(.leaflet-bar a:hover) {
+  background: var(--hover);
+}
+
+.map :global(.leaflet-control-attribution) {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.map :global(.leaflet-control-attribution a) {
+  color: var(--text-2);
+}
+
+.map :global(.leaflet-tooltip) {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.map :global(.leaflet-tooltip-top::before) {
+  border-top-color: var(--line-strong);
+}

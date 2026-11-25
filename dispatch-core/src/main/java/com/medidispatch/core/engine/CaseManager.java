@@ -152,6 +152,19 @@ public class CaseManager {
     public void close(String caseId) {
         move(caseId, CaseStatus.CLOSED);
     }
+
+    /**
+     * The case is called off by a dispatcher: to CANCELLED, and out of the queue if it was waiting there. The case
+     * never changes again; a new reading that still needs help opens a new case. Normally called through
+     * {@link OperatorOverrides#cancelCase}, which ends the case's trips first.
+     *
+     * @param caseId the case
+     * @throws IllegalStateException if the case does not exist or cannot be cancelled from its status
+     */
+    public void cancel(String caseId) {
+        move(caseId, CaseStatus.CANCELLED);
+        queue.remove(caseId);
+    }
     /**
      * The case lost its unit (timeout, failure or preemption): RESPONDING to ALERTED, and back in the queue
      * so another unit is sent. The case keeps its original opening time, so it keeps its place in line.

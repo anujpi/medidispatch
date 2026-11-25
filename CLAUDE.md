@@ -703,8 +703,8 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1, S2, M1, routing R1-R5, M1b and A1 (web app skeleton, see "Web app") are done; next A2 (control room map,
-alerts, case detail, actions), then SEC. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+S1, S2, M1, routing R1-R5, M1b, A1 and A2a-c (web app, control room map, alerts, case card, operator overrides; see
+"Web app") are done; next SEC (login, roles), then the crew PWA and the hospital panel. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
 (map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
 console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
 only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
@@ -925,4 +925,52 @@ BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week
   cream (cream, ink, burnt orange; default, light), navy (navy, white, hot pink), charcoal (charcoal, sand,
   electric blue). --link separate from --accent for contrast; tabular-nums only on .time/.metricValue/.clock
   (Inter widens hyphens in "als-1" otherwise). CSS Modules per folder (components/, pages/).
-- Tests (20): client 6, useLiveSnapshot 4, pages 10 (FakeEventSource + fakeFetch in src/test/fakes.ts).
+- Tests (37): client 6, useLiveSnapshot 4, pages 15, map/routes 3, control/alerts 5, control/CaseActions 4
+  (FakeEventSource + fakeFetch in src/test/fakes.ts; Leaflet runs in jsdom, so the map is not mocked).
+
+## Control room (A2a-c DONE)
+- A2a map: npm leaflet 1.9 + @types/leaflet, used directly (no react-leaflet): src/map/LiveMap.tsx, one L.map made in
+  a useEffect, markers kept in Maps and moved/restyled per snapshot (setIcon only when the CSS classes change, so
+  hover is not lost). Tiles: Esri Canvas World_Light_Gray_Base (cream) / World_Dark_Gray_Base (navy, charcoal),
+  maxNativeZoom 16, switched by a MutationObserver on <html data-theme>; tile pane faded towards --bg. Markers are
+  L.divIcon with CSS-module classes coloured by theme variables: case = dot in its band colour (pulse while
+  ALERTED, bigger + ink ring when selected), unit = 10 px square (filled --busy on a trip, dashed offline), facility
+  = SVG cross (faded on diversion). Free units parked within ~100 m of their base are NOT drawn (they hid the
+  cross); the base's tooltip says "n units free here". Trip lines: src/map/routes.ts askRoute (once per leg) +
+  ahead (forward-only trimming), ported from map.html; className stroke via CSS. Tooltips are passed as DOM text
+  nodes (security review: Leaflet inserts a string as HTML, names come from the API). First fit: everything
+  (facilities, units, cases), maxZoom 13. Selection: ControlRoomPage `picked` state; a closed case is unpicked;
+  the patient's name is a button (aria-pressed) and the row clickable; selecting pans the map if out of view.
+  Layout .mapGrid: map (560 px, fleet under it) | alerts + open cases (minmax(560px, .8fr)); stacks < 1100 px.
+  Table cells nowrap; the queue table is .tight. Not done: incidents and a legend on this map (map.html has both).
+- A2b: src/control/alerts.ts: conditions(snapshot) keyed "critical:", "late:" (CRITICAL + ALERTED >= 2 min),
+  "offline:", "diversion:" (hospitals only); freshAlerts(previous, now, at) raises keys not in the previous picture
+  (first picture: only "late:"); useAlerts keeps up to 50 unacknowledged, derived during render (no setState in an
+  effect); an alert stays until acknowledged even if its cause is gone (ISA-101). AlertsPanel: fixed 156 px list so
+  rows never jump, acknowledge per alert / all, a case alert opens the case. CaseDetail: card floating over the map
+  (z-index 1000): patient, status, opened; per trip: unit, type, Support chip, "To <hospital>, needs ...", drive
+  time from /api/route every 10 s (usePolling keyed by trip+status, position read through a ref), driver tel: link.
+  labels.ts gained NEED and clockTime (Asia/Kolkata).
+- A2c operator overrides (L). Core engine/OperatorOverrides (12 collaborators; builds its own UnitAssigner):
+  cancelCase (MONITORING/ALERTED/RESPONDING only; cancels every active trip, then CaseManager.cancel = CANCELLED +
+  queue.remove), sendUnit (case ALERTED/RESPONDING; unit AVAILABLE; type = any ambulance or a plan primary type;
+  current primary only if ASSIGNED/EN_ROUTE; claims the new unit FIRST, then assignmentManager.cancel(old primary,
+  NOT recovery: no requeue); an ALERTED case leaves the queue + onAssigned; support trips untouched),
+  takeOutOfService (TRANSPORTING refused; on a trip -> recovery.onFailed = FAILED, OFFLINE, requeue; free ->
+  OFFLINE). Refusal lists allowed types ("send one of: AMBULANCE_ALS, AMBULANCE_BLS, NURSE"). Event
+  OverrideApplied(OverrideKind CANCEL_CASE/SEND_UNIT/OUT_OF_SERVICE, caseId, unitId, reason, at). Decided with the
+  user: no standalone "recall" (the engine would re-send the same nearest unit a second later); cancel with bad
+  vitals -> the next reading opens a new case; taking a busy unit from another case -> BACKLOG.
+  Service: DispatchService.cancelCase/sendUnit/takeOutOfService (repeat checks first: cancelled case, same unit
+  already primary, unit already offline -> 200 unchanged; log.info per override); OverrideController
+  POST /api/cases/{id}/cancel, /api/cases/{id}/send, /api/units/{id}/out-of-service with OverrideRequest(unitId,
+  reason 1..200, else 400). Web: control/CaseActions.tsx (Send another unit: free units nearest first by straight
+  line; Cancel case with a warning line; both need a reason and show the service's message on refusal) and
+  OutOfService link per unit row (not while transporting). Tests: OperatorOverridesTest 15, ApiTest +4,
+  CaseActions.test 4.
+- Browser check Nov 25 on the live city: all three work (send stuck for 30 s watched in the DB every 0.5 s; out of
+  service -> next unit in 3 s; cancel frees the unit; repeats 200). ONE unexplained run: a form send of nurse-4
+  (19:10:53 IST) was cancelled 3 s later and the engine re-sent nurse-5 to the same case, right after that case's
+  first unit had failed (sim-injected). Not reproduced; in BACKLOG with the trip history. Inspecting the dev DB:
+  `docker exec medidispatch-db-1 psql -U medidispatch -d medidispatch -c "..."` (tables assignments, cases with a
+  `queued` column owned by JdbcCaseQueue, units).

@@ -194,6 +194,35 @@
   padding: var(--s5);
 }
 
+/* the control room: the map (with the fleet under it) beside the case list */
+.mapGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(560px, 0.8fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+.stack {
+  display: grid;
+  gap: var(--s5);
+  min-width: 0;
+}
+
+.mapPanel {
+  position: relative;            /* the case card floats over the map */
+  height: 560px;
+  overflow: hidden;              /* the map's corners follow the panel's */
+}
+
+@media (max-width: 1100px) {
+  .mapGrid {
+    grid-template-columns: 1fr;
+  }
+  .mapPanel {
+    height: 440px;
+  }
+}
+
 /* ---- tables ---- */
 .table {
   width: 100%;
@@ -219,6 +248,7 @@
   border-bottom: 1px solid var(--line);
   color: var(--text-2);
   vertical-align: middle;
+  white-space: nowrap;           /* one line per row; a table too wide for its panel scrolls sideways */
 }
 
 .table tbody tr:last-child td {
@@ -229,12 +259,46 @@
   background: var(--hover);
 }
 
+/* a dense table for a narrow column: less space between columns */
+.tight th,
+.tight td {
+  padding: 0 var(--s3);
+}
+
+.tight th:first-child,
+.tight td:first-child {
+  padding-left: var(--s5);
+}
+
 .compact td {
   height: 40px;
 }
 
 .right {
   text-align: right !important;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+/* the picked case: a tint and an ink edge on the left */
+.table tbody tr.selectedRow td {
+  background: var(--surface-2);
+}
+
+.table tbody tr.selectedRow td:first-child {
+  box-shadow: inset 3px 0 0 var(--text);
+}
+
+/* the patient's name is the row's button, so the list works from the keyboard too */
+.rowButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 /* a critical row carries a thin red edge: the one strong mark on the screen */
