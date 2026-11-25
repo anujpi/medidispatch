@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in to MediDispatch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F3EC}
+a{color:#8F3A10}a:hover{color:#6E2C0B}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #2F5E9E;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 900px; box-sizing: border-box; background: #F6F3EC; color: #1C1B19; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; gap: 10px; padding: 24px 40px;">
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#C62D33"></rect><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#FFFFFF"></path></svg>
+    <span style="font-size: 15px; font-weight: 600; letter-spacing: -0.01em;">MediDispatch</span>
+    <span style="margin-left: auto; font-size: 13px; color: #6B655B;">Emergency medical dispatch, Bengaluru</span>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 72px; padding: 24px 40px 56px;">
+
+    <div style="flex: 0 1 420px; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <h1 style="margin: 0; font-size: 40px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em;">From the first warning sign to the hospital door.</h1>
+        <p style="margin: 0; font-size: 16px; line-height: 1.55; color: #4A463F;">Wearables watch the patient. The moment readings turn dangerous, the nearest right ambulance is sent by road, and the hospital sees the patient coming, vitals and all.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; border-top: 1px solid #E3DCCF;">
+        <div style="display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid #E3DCCF;">
+          <span style="width: 92px; flex: none; font-size: 13px; font-weight: 600;">Dispatcher</span>
+          <span style="font-size: 13px; color: #4A463F; line-height: 1.5;">Watches every case and unit in the city and can overrule any decision.</span>
+        </div>
+        <div style="display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid #E3DCCF;">
+          <span style="width: 92px; flex: none; font-size: 13px; font-weight: 600;">Hospital</span>
+          <span style="font-size: 13px; color: #4A463F; line-height: 1.5;">Sees who is arriving, how sick they are and when, and takes the handover.</span>
+        </div>
+        <div style="display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid #E3DCCF;">
+          <span style="width: 92px; flex: none; font-size: 13px; font-weight: 600;">Crew</span>
+          <span style="font-size: 13px; color: #4A463F; line-height: 1.5;">Gets the call on the phone: where to go, who the patient is, what they need.</span>
+        </div>
+        <div style="display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid #E3DCCF;">
+          <span style="width: 92px; flex: none; font-size: 13px; font-weight: 600;">Patient</span>
+          <span style="font-size: 13px; color: #4A463F; line-height: 1.5;">Knows help is coming and when, and keeps their own health record.</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex: 0 1 400px; background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 14px; box-shadow: 0 1px 2px rgba(28,27,25,0.06), 0 12px 32px rgba(28,27,25,0.06); padding: 36px; display: flex; flex-direction: column; gap: 22px;">
+
+      <sc-if value="{{ stepOne }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <h2 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Sign in</h2>
+          <p style="margin: 0; font-size: 14px; color: #4A463F; line-height: 1.5;">Use the mobile number your hospital or control room registered. We send a 6-digit code to it.</p>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label for="phone" style="font-size: 13px; font-weight: 500;">Mobile number</label>
+          <div style="display: flex; height: 46px; border: 1px solid #CFC6B6; border-radius: 8px; overflow: hidden; background: #FFFFFF;">
+            <span style="display: flex; align-items: center; padding: 0 12px; border-right: 1px solid #E3DCCF; font-size: 15px; color: #4A463F; background: #F6F3EC;">+91</span>
+            <input id="phone" type="tel" inputmode="numeric" autocomplete="tel-national" value="98450 12345" style="flex: 1; min-width: 0; border: none; padding: 0 12px; font: inherit; font-size: 16px; letter-spacing: 0.02em; color: #1C1B19; background: transparent;">
+          </div>
+        </div>
+        <button type="button" onClick="{{ sendCode }}" style="height: 46px; border: none; border-radius: 8px; background: #B84D18; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;">Send code</button>
+        <p style="margin: 0; font-size: 12px; color: #6B655B; line-height: 1.5;">Not registered yet? Ask your control room supervisor to add your number.</p>
+      </sc-if>
+
+      <sc-if value="{{ stepTwo }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <h2 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Enter the code</h2>
+          <p style="margin: 0; font-size: 14px; color: #4A463F; line-height: 1.5;">Sent to +91 98450 12345. It works for 5 minutes.</p>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label for="code" style="font-size: 13px; font-weight: 500;">6-digit code</label>
+          <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="482 913" style="height: 54px; border: 1px solid #CFC6B6; border-radius: 8px; padding: 0 16px; font: inherit; font-size: 26px; font-weight: 600; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; color: #1C1B19; background: #FFFFFF;">
+        </div>
+        <a href="ControlRoom.dc.html" style="height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #B84D18; color: #FFFFFF; font-size: 15px; font-weight: 600; text-decoration: none;">Sign in</a>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; color: #6B655B;">
+          <button type="button" onClick="{{ back }}" style="padding: 0; border: none; background: none; font: inherit; color: #8F3A10; cursor: pointer;">Change number</button>
+          <span style="font-variant-numeric: tabular-nums;">New code in 0:24</span>
+        </div>
+      </sc-if>
+
+      <div style="display: flex; align-items: center; gap: 8px; padding-top: 18px; border-top: 1px solid #E3DCCF; font-size: 12px; color: #6B655B;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B655B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+        You stay signed in for one shift. Patient records are only shown to the people treating them.
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 16px 40px; border-top: 1px solid #E3DCCF; font-size: 12px; color: #6B655B;">Demonstration build. Every patient, crew and call shown here is simulated.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 1 };
+  }
+  renderVals() {
+    return {
+      stepOne: this.state.step === 1,
+      stepTwo: this.state.step === 2,
+      sendCode: () => this.setState({ step: 2 }),
+      back: () => this.setState({ step: 1 })
+    };
+  }
+}
+</script>
+</body>
+</html>

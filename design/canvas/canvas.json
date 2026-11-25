@@ -1,0 +1,23 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-25T14:10:00Z"},
+  "title": "MediDispatch screens",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "Sign in", "is_interactive": true, "expand": "fill"},
+    "ControlRoom.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "Control room", "is_interactive": true, "expand": "fill"},
+    "PatientFile.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 1180, "title": "Patient file", "is_interactive": true, "expand": "fill"},
+    "Hospital.dc.html": {"x": 0, "y": 1600, "w": 1440, "h": 960, "title": "Hospital: arrivals", "is_interactive": true, "expand": "fill"},
+    "Handover.dc.html": {"x": 1520, "y": 1600, "w": 1440, "h": 1020, "title": "Hospital: handover", "is_interactive": true, "expand": "fill"},
+    "Crew.dc.html": {"x": 0, "y": 3040, "w": 390, "h": 844, "title": "Crew phone: current call"},
+    "Patient.dc.html": {"x": 470, "y": 3040, "w": 390, "h": 844, "title": "Patient phone: help on the way"}
+  },
+  "order": ["Main.dc.html", "ControlRoom.dc.html", "PatientFile.dc.html", "Hospital.dc.html", "Handover.dc.html", "Crew.dc.html", "Patient.dc.html"],
+  "notes": {
+    "rowDispatch": {"x": 0, "y": -300, "text": "Sign in, then the dispatcher", "kind": "title1", "maxW": 4480},
+    "rowHospital": {"x": 0, "y": 1300, "text": "The receiving hospital", "kind": "title1", "maxW": 2960},
+    "rowPhones": {"x": 0, "y": 2740, "text": "On the phone: crew and patient", "kind": "title1", "maxW": 860}
+  },
+  "designSystems": []
+}

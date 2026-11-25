@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hospital arrivals</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F3EC}
+a{color:#8F3A10}a:hover{color:#6E2C0B}
+a:focus-visible,button:focus-visible{outline:2px solid #2F5E9E;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 960px; background: #F6F3EC; color: #1C1B19; font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding: 0 28px; min-height: 56px; background: #FFFDF8; border-bottom: 1px solid #E3DCCF;">
+    <a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; color: #1C1B19; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#C62D33"></rect><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#FFFFFF"></path></svg>
+      <span style="font-size: 15px; font-weight: 600;">MediDispatch</span>
+    </a>
+    <nav aria-label="Hospital" style="display: flex; gap: 4px;">
+      <a href="Hospital.dc.html" aria-current="page" style="padding: 8px 12px; border-radius: 6px; background: #EFE9DE; color: #1C1B19; font-weight: 600; text-decoration: none;">Arrivals</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Handed over</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Our ambulances</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Beds and teams</a>
+    </nav>
+    <span style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+      <span style="width: 30px; height: 30px; border-radius: 50%; background: #23774A; color: #FFFFFF; display: grid; place-items: center; font-size: 12px; font-weight: 600;">KH</span>
+      <span style="display: flex; flex-direction: column; line-height: 1.2;"><span style="font-size: 13px; font-weight: 600;">Dr Kiran Hegde</span><span style="font-size: 12px; color: #6B655B;">Emergency department</span></span>
+    </span>
+  </header>
+
+  <main style="max-width: 1360px; margin: 0 auto; padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 18px;">
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 24px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h1 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">Jayanagar Heart and Stroke Centre</h1>
+        <span style="font-size: 14px; color: #4A463F;">Emergency department. Stroke unit, cath lab, adult ICU.</span>
+      </div>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 10px 14px; background: #FFFDF8; border: 1px solid {{ statusBorder }}; border-radius: 10px;">
+        <span style="display: flex; flex-direction: column; line-height: 1.3;">
+          <span style="font-size: 14px; font-weight: 600; color: {{ statusColor }};">{{ statusTitle }}</span>
+          <span style="font-size: 12px; color: #6B655B;">{{ statusSub }}</span>
+        </span>
+        <button type="button" role="switch" aria-checked="{{ accepting }}" aria-label="Accepting new patients" onClick="{{ toggle }}" style="width: 46px; height: 26px; padding: 3px; border: none; border-radius: 13px; background: {{ switchBg }}; cursor: pointer; display: flex; justify-content: {{ knobSide }};">
+          <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0,0,0,0.25);"></span>
+        </button>
+      </div>
+    </div>
+
+    <div role="group" aria-label="Capacity" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: #E3DCCF; border: 1px solid #E3DCCF; border-radius: 10px; overflow: hidden;">
+      <sc-for list="{{ capacity }}" as="c" hint-placeholder-count="5">
+        <div style="background: #FFFDF8; padding: 14px 18px; display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 12px; font-weight: 500; color: #6B655B;">{{ c.label }}</span>
+          <span style="font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ c.color }};">{{ c.value }}<span style="margin-left: 4px; font-size: 13px; font-weight: 500; color: #6B655B;">{{ c.of }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+      <section aria-labelledby="arrivals-title" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: baseline; gap: 10px;">
+          <h2 id="arrivals-title" style="margin: 0; font-size: 17px; font-weight: 600;">On the way to you</h2>
+          <span style="font-size: 13px; color: #6B655B;">Soonest first. Vitals update every 30 seconds from the ambulance.</span>
+        </div>
+
+        <sc-for list="{{ arrivals }}" as="p" hint-placeholder-count="3">
+          <article style="display: flex; flex-wrap: wrap; background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 12px; overflow: hidden; box-shadow: {{ p.edge }};">
+            <div style="flex: 0 0 132px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; padding: 18px 12px; background: {{ p.etaBg }}; border-right: 1px solid #E3DCCF;">
+              <span style="font-size: 12px; font-weight: 500; color: #6B655B;">Arrives in</span>
+              <span style="font-size: 44px; line-height: 1; font-weight: 700; letter-spacing: -0.04em; font-variant-numeric: tabular-nums;">{{ p.eta }}</span>
+              <span style="font-size: 13px; color: #4A463F;">min, at {{ p.at }}</span>
+            </div>
+            <div style="flex: 1 1 420px; min-width: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;">
+                <span style="display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 6px; background: {{ p.tagBg }}; color: {{ p.tagText }}; font-size: 12px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{ p.dot }};"></span>{{ p.band }}</span>
+                <h3 style="margin: 0; font-size: 17px; font-weight: 600;">{{ p.name }}</h3>
+                <span style="color: #4A463F;">{{ p.who }}</span>
+                <span style="margin-left: auto; font-size: 13px; color: #4A463F;">{{ p.unit }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px;">
+                <span style="font-weight: 600;">{{ p.reason }}</span>
+                <span style="color: #4A463F;">{{ p.needs }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px 22px; padding-top: 10px; border-top: 1px solid #EFE9DE;">
+                <sc-for list="{{ p.vitals }}" as="v" hint-placeholder-count="6">
+                  <span style="display: flex; flex-direction: column;">
+                    <span style="font-size: 11px; color: #6B655B;">{{ v.label }}</span>
+                    <span style="font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ v.color }};">{{ v.value }}</span>
+                  </span>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex: 0 0 auto; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 16px 20px;">
+              <a href="Handover.dc.html" style="height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border-radius: 6px; background: #B84D18; color: #FFFFFF; font-size: 13px; font-weight: 600; text-decoration: none;">Open handover</a>
+              <button type="button" style="height: 36px; padding: 0 14px; border: 1px solid #CFC6B6; border-radius: 6px; background: #FFFDF8; color: #1C1B19; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;">Call the crew</button>
+            </div>
+          </article>
+        </sc-for>
+      </section>
+
+      <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 18px;">
+        <section aria-labelledby="ready-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 12px; padding: 18px 20px;">
+          <h2 id="ready-title" style="margin: 0 0 10px; font-size: 15px; font-weight: 600;">Get ready for Asha Rao</h2>
+          <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+            <li style="display: flex; gap: 10px;"><input type="checkbox" id="r1" checked style="width: 18px; height: 18px; margin: 1px 0 0; accent-color: #23774A;"><label for="r1">Resus bay 2 kept free</label></li>
+            <li style="display: flex; gap: 10px;"><input type="checkbox" id="r2" checked style="width: 18px; height: 18px; margin: 1px 0 0; accent-color: #23774A;"><label for="r2">Sepsis team told</label></li>
+            <li style="display: flex; gap: 10px;"><input type="checkbox" id="r3" style="width: 18px; height: 18px; margin: 1px 0 0; accent-color: #23774A;"><label for="r3">Blood cultures and lactate ready</label></li>
+            <li style="display: flex; gap: 10px;"><input type="checkbox" id="r4" style="width: 18px; height: 18px; margin: 1px 0 0; accent-color: #23774A;"><label for="r4">Antibiotic without penicillin chosen</label></li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="done-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 12px; overflow: hidden;">
+          <h2 id="done-title" style="margin: 0; padding: 16px 20px 10px; font-size: 15px; font-weight: 600;">Handed over today</h2>
+          <ul style="list-style: none; margin: 0; padding: 0; font-size: 13px;">
+            <sc-for list="{{ done }}" as="d" hint-placeholder-count="4">
+              <li style="display: flex; gap: 10px; padding: 10px 20px; border-top: 1px solid #EFE9DE;">
+                <span style="font-weight: 600; font-variant-numeric: tabular-nums; color: #4A463F;">{{ d.at }}</span>
+                <span style="flex: 1;">{{ d.name }}</span>
+                <span style="color: #6B655B;">{{ d.what }}</span>
+              </li>
+            </sc-for>
+          </ul>
+          <p style="margin: 0; padding: 12px 20px; border-top: 1px solid #EFE9DE; font-size: 13px; color: #4A463F;">On average you heard about each patient <strong>12 min</strong> before they arrived.</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { accepting: true };
+  }
+  renderVals() {
+    const on = this.state.accepting;
+    const ink = '#1C1B19', red = '#A3231F', orange = '#934006';
+    const v = (label, value, color) => ({ label, value, color: color || ink });
+    return {
+      accepting: on ? 'true' : 'false',
+      toggle: () => this.setState({ accepting: !on }),
+      switchBg: on ? '#23774A' : '#CFC6B6',
+      knobSide: on ? 'flex-end' : 'flex-start',
+      statusTitle: on ? 'Accepting patients' : 'On diversion',
+      statusSub: on ? 'Ambulances are sent here as usual' : 'New ambulances go elsewhere; the three below still come',
+      statusColor: on ? '#23774A' : orange,
+      statusBorder: on ? '#E3DCCF' : '#E7B98F',
+      capacity: [
+        { label: 'Emergency beds free', value: '4', of: 'of 18', color: ink },
+        { label: 'Resus bays free', value: '1', of: 'of 3', color: orange },
+        { label: 'ICU beds free', value: '1', of: 'of 8', color: orange },
+        { label: 'Cath lab', value: 'Ready', of: '', color: '#23774A' },
+        { label: 'Stroke team', value: 'On call', of: '', color: '#23774A' }
+      ],
+      arrivals: [
+        { eta: '6', at: '19:48', band: 'Critical', tagBg: '#F8DEDD', tagText: red, dot: '#C62D33', etaBg: '#FBEDEC', edge: 'inset 4px 0 0 #C62D33',
+          name: 'Asha Rao', who: '68 F', unit: 'als-3, Ravi Kumar and Sunita Das', reason: 'Possible sepsis', needs: 'NEWS2 13, on oxygen. Allergic to penicillin.',
+          vitals: [v('Heart rate', '116', orange), v('BP', '98/62', orange), v('SpO2', '95%', ink), v('Breathing', '24', red), v('Temp', '38.9', ink), v('Alertness', 'Confused', red)] },
+        { eta: '14', at: '19:56', band: 'High', tagBg: '#FBE4D2', tagText: orange, dot: '#C2620E', etaBg: '#FFFDF8', edge: 'none',
+          name: 'Suresh Gowda', who: '59 M', unit: 'bls-2, Anil Reddy', reason: 'Chest pain for 40 minutes', needs: 'Needs the cath lab. ECG sent from the ambulance.',
+          vitals: [v('Heart rate', '102'), v('BP', '148/92'), v('SpO2', '95%'), v('Breathing', '20'), v('Temp', '36.9'), v('Alertness', 'Alert')] },
+        { eta: '22', at: '20:04', band: 'High', tagBg: '#FBE4D2', tagText: orange, dot: '#C2620E', etaBg: '#FFFDF8', edge: 'none',
+          name: 'Lakshmi Iyer', who: '81 F', unit: 'bls-6, Farhan Ali', reason: 'Fall at home, hip pain', needs: 'Suspected hip fracture. On blood thinners.',
+          vitals: [v('Heart rate', '96'), v('BP', '128/76'), v('SpO2', '96%'), v('Breathing', '18'), v('Temp', '36.6'), v('Alertness', 'Alert')] }
+      ],
+      done: [
+        { at: '18:52', name: 'Mohan Das, 71', what: 'Stroke, thrombolysed' },
+        { at: '17:30', name: 'Fatima Begum, 45', what: 'Asthma attack' },
+        { at: '15:05', name: 'Arjun Nair, 74', what: 'Low blood sugar' },
+        { at: '11:40', name: 'Ritu Singh, 33', what: 'Road accident' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

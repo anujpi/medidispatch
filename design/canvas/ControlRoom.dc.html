@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Control room</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F3EC}
+a{color:#8F3A10}a:hover{color:#6E2C0B}
+a:focus-visible,button:focus-visible{outline:2px solid #2F5E9E;outline-offset:2px}
+@keyframes ring{0%{r:7;opacity:.55}100%{r:22;opacity:0}}
+.pulse{animation:ring 1.6s ease-out infinite}
+@media (prefers-reduced-motion: reduce){.pulse{animation:none}}
+</style>
+</helmet>
+<div style="min-height: 900px; background: #F6F3EC; color: #1C1B19; font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding: 0 28px; min-height: 56px; background: #FFFDF8; border-bottom: 1px solid #E3DCCF;">
+    <a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; color: #1C1B19; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#C62D33"></rect><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#FFFFFF"></path></svg>
+      <span style="font-size: 15px; font-weight: 600;">MediDispatch</span>
+    </a>
+    <nav aria-label="Control room" style="display: flex; gap: 4px; font-size: 14px;">
+      <a href="ControlRoom.dc.html" aria-current="page" style="padding: 8px 12px; border-radius: 6px; background: #EFE9DE; color: #1C1B19; font-weight: 600; text-decoration: none;">Live</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Cases</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Fleet</a>
+      <a href="Hospital.dc.html" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Hospitals</a>
+      <a href="#" style="padding: 8px 12px; border-radius: 6px; color: #4A463F; text-decoration: none;">Reports</a>
+    </nav>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 18px;">
+      <span style="font-size: 13px; color: #4A463F; font-variant-numeric: tabular-nums;">19:42:08 <span style="color: #6B655B;">IST</span></span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid #E3DCCF; border-radius: 999px; font-size: 12px; font-weight: 500; color: #4A463F;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #23774A;"></span>Live</span>
+      <span style="display: flex; align-items: center; gap: 10px;">
+        <span style="width: 30px; height: 30px; border-radius: 50%; background: #2F5E9E; color: #FFFFFF; display: grid; place-items: center; font-size: 12px; font-weight: 600;">MS</span>
+        <span style="display: flex; flex-direction: column; line-height: 1.2;"><span style="font-size: 13px; font-weight: 600;">Meera Shankar</span><span style="font-size: 12px; color: #6B655B;">Dispatcher, shift B</span></span>
+      </span>
+    </div>
+  </header>
+
+  <main style="flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; box-sizing: border-box; padding: 20px 28px 28px; display: flex; flex-direction: column; gap: 16px;">
+
+    <div role="group" aria-label="City summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: #E3DCCF; border: 1px solid #E3DCCF; border-radius: 10px; overflow: hidden;">
+      <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="6">
+        <div style="background: #FFFDF8; padding: 14px 18px; display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 12px; font-weight: 500; color: #6B655B;">{{ m.label }}</span>
+          <span style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: {{ m.color }};">{{ m.value }}<span style="margin-left: 4px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: #6B655B;">{{ m.of }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+
+      <section aria-label="City map" style="flex: 999 1 640px; min-width: 0; position: relative; height: 640px; border: 1px solid #E3DCCF; border-radius: 10px; overflow: hidden; background: #ECE7DC;">
+        <svg width="100%" height="100%" viewBox="0 0 900 640" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Map of Bengaluru with open cases, units and hospitals">
+          <rect width="900" height="640" fill="#ECE7DC"></rect>
+          <path d="M610 70c60-10 120 20 130 70s-40 80-95 70-80-40-75-80 10-55 40-60z" fill="#D8DFE0"></path>
+          <path d="M120 430c40-25 95-15 110 20s-15 70-60 70-85-20-80-50 10-30 30-40z" fill="#D8DFE0"></path>
+          <path d="M330 300c25-12 60-5 66 18s-14 40-42 38-46-14-42-32 6-18 18-24z" fill="#D8DFE0"></path>
+          <g fill="none" stroke="#FFFFFF" stroke-linecap="round">
+            <path d="M-20 330C150 300 300 330 450 320S720 290 920 300" stroke-width="7"></path>
+            <path d="M440 -20C430 120 460 230 450 320S430 520 470 660" stroke-width="7"></path>
+            <path d="M450 320c120 0 210-70 250-150" stroke-width="5"></path>
+            <path d="M450 320c-60 80-170 120-250 210" stroke-width="5"></path>
+            <ellipse cx="450" cy="320" rx="300" ry="235" stroke-width="6"></ellipse>
+          </g>
+          <g fill="none" stroke="#F8F5EF" stroke-width="2.5" stroke-linecap="round">
+            <path d="M200 120c60 40 120 50 180 40s120 10 160 50"></path>
+            <path d="M150 220c100 10 190 30 300 20"></path>
+            <path d="M520 420c60 10 130 50 180 110"></path>
+            <path d="M260 420c40-40 90-60 140-60"></path>
+            <path d="M600 260c40 40 60 90 60 150"></path>
+            <path d="M330 80c-10 60 0 120 30 160"></path>
+            <path d="M560 560c-30-60-30-120 0-170"></path>
+            <path d="M80 300c40-60 80-100 130-130"></path>
+          </g>
+          <g fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M372 404L404 392L418 370L452 362L470 342" stroke="#2F5E9E"></path>
+            <path d="M600 214L560 236L540 262L512 270L497 296" stroke="#2F5E9E"></path>
+            <path d="M266 254L300 270L330 262L352 238L384 236" stroke="#4A463F"></path>
+          </g>
+          <g fill="#4A463F" stroke="#FFFDF8" stroke-width="1.5">
+            <path d="M462 352h8v8h8v8h-8v8h-8v-8h-8v-8h8z"></path>
+            <path d="M376 222h8v8h8v8h-8v8h-8v-8h-8v-8h8z"></path>
+            <path d="M650 410h8v8h8v8h-8v8h-8v-8h-8v-8h8z"></path>
+            <path d="M210 160h8v8h8v8h-8v8h-8v-8h-8v-8h8z"></path>
+            <path d="M716 150h8v8h8v8h-8v8h-8v-8h-8v-8h8z" opacity="0.35"></path>
+          </g>
+          <g stroke="#FFFDF8" stroke-width="2">
+            <rect x="366" y="398" width="12" height="12" rx="2" fill="#2F5E9E"></rect>
+            <rect x="594" y="208" width="12" height="12" rx="2" fill="#2F5E9E"></rect>
+            <rect x="260" y="248" width="12" height="12" rx="2" fill="#2F5E9E"></rect>
+            <rect x="540" y="480" width="12" height="12" rx="2" fill="#2F5E9E"></rect>
+          </g>
+          <circle class="pulse" cx="470" cy="342" r="7" fill="#C62D33"></circle>
+          <circle cx="470" cy="342" r="10" fill="#C62D33" stroke="#1C1B19" stroke-width="3"></circle>
+          <circle class="pulse" cx="690" cy="500" r="7" fill="#C62D33"></circle>
+          <circle cx="690" cy="500" r="8" fill="#C62D33" stroke="#FFFDF8" stroke-width="2.5"></circle>
+          <circle cx="497" cy="296" r="8" fill="#C2620E" stroke="#FFFDF8" stroke-width="2.5"></circle>
+          <circle cx="548" cy="470" r="8" fill="#C2620E" stroke="#FFFDF8" stroke-width="2.5"></circle>
+          <circle cx="180" cy="300" r="8" fill="#A07A00" stroke="#FFFDF8" stroke-width="2.5"></circle>
+          <circle cx="300" cy="520" r="8" fill="#A07A00" stroke="#FFFDF8" stroke-width="2.5"></circle>
+        </svg>
+
+        <div style="position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; border: 1px solid #CFC6B6; border-radius: 6px; overflow: hidden; background: #FFFDF8;">
+          <button type="button" aria-label="Zoom in" style="width: 32px; height: 32px; border: none; border-bottom: 1px solid #E3DCCF; background: none; font: inherit; font-size: 18px; color: #1C1B19; cursor: pointer;">+</button>
+          <button type="button" aria-label="Zoom out" style="width: 32px; height: 32px; border: none; background: none; font: inherit; font-size: 18px; color: #1C1B19; cursor: pointer;">−</button>
+        </div>
+
+        <div style="position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 12px; background: rgba(255,253,248,0.92); border: 1px solid #E3DCCF; border-radius: 8px; font-size: 12px; color: #4A463F;">
+          <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #C62D33;"></span>Critical</span>
+          <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #C2620E;"></span>High</span>
+          <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #A07A00;"></span>Medium</span>
+          <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 2px; background: #2F5E9E;"></span>Unit on a trip</span>
+          <span style="display: flex; align-items: center; gap: 6px;"><span style="font-weight: 700; color: #4A463F;">+</span>Hospital</span>
+        </div>
+
+        <aside aria-labelledby="card-title" style="position: absolute; top: 12px; right: 12px; width: 340px; max-width: calc(100% - 24px); background: #FFFDF8; border: 1px solid #CFC6B6; border-radius: 12px; box-shadow: 0 12px 28px rgba(28,27,25,0.16); overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #E3DCCF;">
+            <h2 id="card-title" style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em;">Asha Rao</h2>
+            <span style="display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 6px; background: #F8DEDD; color: #A3231F; font-size: 12px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #C62D33;"></span>Critical</span>
+            <button type="button" aria-label="Close" style="margin-left: auto; width: 28px; height: 28px; border: none; border-radius: 6px; background: none; color: #6B655B; font: inherit; font-size: 18px; cursor: pointer;">×</button>
+          </div>
+          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #E3DCCF; font-size: 13px; color: #4A463F;">
+            <span>68, female. Hypertension, type 2 diabetes. Allergic to penicillin.</span>
+            <span>4th Block, Jayanagar. Case opened 19:31, 11 min ago.</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #E3DCCF;">
+            <sc-for list="{{ cardVitals }}" as="v" hint-placeholder-count="4">
+              <div style="padding: 10px 0 10px 16px; display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-size: 11px; color: #6B655B;">{{ v.label }}</span>
+                <span style="font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ v.color }};">{{ v.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #E3DCCF; font-size: 13px;">
+            <div style="display: flex; align-items: center; gap: 8px;"><span style="font-weight: 600;">als-3</span><span style="color: #6B655B;">ALS ambulance, patient on board</span><span style="margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums;">6 min</span></div>
+            <span style="color: #4A463F;">To Jayanagar Heart and Stroke Centre, pre-alerted</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px;">
+            <a href="PatientFile.dc.html" style="height: 32px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #B84D18; color: #FFFFFF; font-size: 13px; font-weight: 600; text-decoration: none;">Open patient file</a>
+            <button type="button" style="height: 32px; padding: 0 12px; border: 1px solid #CFC6B6; border-radius: 6px; background: #FFFDF8; color: #1C1B19; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;">Send another unit</button>
+            <button type="button" style="height: 32px; padding: 0 12px; border: 1px solid #CFC6B6; border-radius: 6px; background: #FFFDF8; color: #A3231F; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;">Cancel case</button>
+          </div>
+        </aside>
+      </section>
+
+      <div style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+
+        <section aria-labelledby="alerts-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 10px; overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 0 16px; min-height: 46px; border-bottom: 1px solid #E3DCCF;">
+            <h2 id="alerts-title" style="margin: 0; font-size: 14px; font-weight: 600;">Alerts</h2>
+            <span style="min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: #C62D33; color: #FFFFFF; font-size: 12px; font-weight: 600;">3</span>
+            <button type="button" style="margin-left: auto; height: 26px; padding: 0 10px; border: 1px solid #CFC6B6; border-radius: 6px; background: #FFFDF8; color: #4A463F; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;">Acknowledge all</button>
+          </div>
+          <ul style="list-style: none; margin: 0; padding: 0;">
+            <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="3">
+              <li style="display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px 0 16px; border-bottom: 1px solid #EFE9DE; font-size: 13px;">
+                <span style="width: 8px; height: 8px; flex: none; border-radius: {{ a.shape }}; background: {{ a.color }};"></span>
+                <span style="flex: 1; font-weight: 500;">{{ a.text }}</span>
+                <span style="font-size: 12px; color: #6B655B; font-variant-numeric: tabular-nums;">{{ a.at }}</span>
+                <button type="button" aria-label="Acknowledge" style="height: 26px; padding: 0 8px; border: none; border-radius: 6px; background: #EFE9DE; color: #4A463F; font: inherit; font-size: 12px; cursor: pointer;">Seen</button>
+              </li>
+            </sc-for>
+          </ul>
+        </section>
+
+        <section aria-labelledby="cases-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 10px; overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 0 16px; min-height: 46px; border-bottom: 1px solid #E3DCCF;">
+            <h2 id="cases-title" style="margin: 0; font-size: 14px; font-weight: 600;">Open cases</h2>
+            <span style="min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: #EFE9DE; color: #4A463F; font-size: 12px; font-weight: 600;">6</span>
+            <span style="margin-left: auto; font-size: 12px; color: #6B655B;">Most urgent first</span>
+          </div>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+              <thead>
+                <tr style="background: #F8F4EC;">
+                  <th style="height: 34px; padding: 0 12px 0 16px; text-align: left; font-size: 12px; font-weight: 500; color: #6B655B;">Priority</th>
+                  <th style="padding: 0 12px; text-align: left; font-size: 12px; font-weight: 500; color: #6B655B;">Patient</th>
+                  <th style="padding: 0 12px; text-align: left; font-size: 12px; font-weight: 500; color: #6B655B;">Status</th>
+                  <th style="padding: 0 12px; text-align: left; font-size: 12px; font-weight: 500; color: #6B655B;">Unit</th>
+                  <th style="padding: 0 16px 0 12px; text-align: right; font-size: 12px; font-weight: 500; color: #6B655B;">Waiting</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ cases }}" as="c" hint-placeholder-count="6">
+                  <tr style="background: {{ c.rowBg }};">
+                    <td style="height: 46px; padding: 0 12px 0 16px; border-top: 1px solid #EFE9DE; box-shadow: {{ c.edge }}; white-space: nowrap;">
+                      <span style="display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 6px; background: {{ c.tagBg }}; color: {{ c.tagText }}; font-size: 12px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{ c.dot }};"></span>{{ c.band }}</span>
+                    </td>
+                    <td style="padding: 0 12px; border-top: 1px solid #EFE9DE; white-space: nowrap;"><a href="PatientFile.dc.html" style="color: #1C1B19; font-weight: 600; text-decoration: none;">{{ c.name }}</a><span style="margin-left: 6px; color: #6B655B;">{{ c.who }}</span></td>
+                    <td style="padding: 0 12px; border-top: 1px solid #EFE9DE; color: #4A463F; white-space: nowrap;">{{ c.status }}</td>
+                    <td style="padding: 0 12px; border-top: 1px solid #EFE9DE; white-space: nowrap; font-weight: 500; color: {{ c.unitColor }};">{{ c.unit }}</td>
+                    <td style="padding: 0 16px 0 12px; border-top: 1px solid #EFE9DE; text-align: right; white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ c.waitColor }};">{{ c.wait }}<span style="margin-left: 3px; font-weight: 400; color: #6B655B;">min</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const ink = '#1C1B19', red = '#A3231F';
+    const bands = {
+      Critical: { tagBg: '#F8DEDD', tagText: '#A3231F', dot: '#C62D33', edge: 'inset 3px 0 0 #C62D33' },
+      High: { tagBg: '#FBE4D2', tagText: '#934006', dot: '#C2620E', edge: 'none' },
+      Medium: { tagBg: '#F4EBCB', tagText: '#6F5300', dot: '#A07A00', edge: 'none' }
+    };
+    const row = (band, name, who, status, unit, wait, opts) => Object.assign({
+      band, name, who, status, unit, wait,
+      unitColor: unit === 'Awaiting unit' ? '#6B655B' : ink,
+      waitColor: ink, rowBg: '#FFFDF8'
+    }, bands[band], opts || {});
+    return {
+      metrics: [
+        { label: 'Open cases', value: '6', of: '', color: ink },
+        { label: 'Critical', value: '2', of: '', color: '#C62D33' },
+        { label: 'Awaiting a unit', value: '1', of: '', color: '#C62D33' },
+        { label: 'Units free', value: '13', of: 'of 20', color: ink },
+        { label: 'To hospital', value: '3', of: '', color: ink },
+        { label: 'Median response today', value: '8.4', of: 'min', color: ink }
+      ],
+      cardVitals: [
+        { label: 'Heart rate', value: '124', color: '#934006' },
+        { label: 'SpO2', value: '92%', color: '#934006' },
+        { label: 'BP', value: '92/58', color: '#934006' },
+        { label: 'NEWS2', value: '13', color: '#A3231F' }
+      ],
+      alerts: [
+        { text: 'Imran Khan has waited 3 min for a unit', at: '19:41', color: '#C62D33', shape: '50%' },
+        { text: 'Asha Rao is critical', at: '19:31', color: '#C62D33', shape: '50%' },
+        { text: 'Whitefield General went on diversion', at: '19:24', color: '#C2620E', shape: '2px' }
+      ],
+      cases: [
+        row('Critical', 'Imran Khan', '54 M', 'Awaiting unit', 'Awaiting unit', '3', { waitColor: red }),
+        row('Critical', 'Asha Rao', '68 F', 'To hospital', 'als-3', '11', { rowBg: '#F3EEE4' }),
+        row('High', 'Suresh Gowda', '59 M', 'To hospital', 'bls-2', '19'),
+        row('High', 'Lakshmi Iyer', '81 F', 'To hospital', 'bls-6', '24'),
+        row('High', 'Rahul Murthy', '6 M', 'On scene', 'bls-5', '9'),
+        row('Medium', 'Kavya Sharma', '82 F', 'Unit on the way', 'nurse-1', '6')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

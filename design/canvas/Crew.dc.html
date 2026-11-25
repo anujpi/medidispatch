@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Crew: current call</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8F3A10}a:hover{color:#6E2C0B}
+a:focus-visible,button:focus-visible{outline:2px solid #2F5E9E;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F3EC; color: #1C1B19; font-family: Inter, system-ui, sans-serif; font-size: 15px; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; gap: 10px; padding: 16px 20px 12px;">
+    <span style="font-size: 17px; font-weight: 700;">als-3</span>
+    <span style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: #E4ECF6; color: #24497C; font-size: 13px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #2F5E9E;"></span>Patient on board</span>
+    <button type="button" aria-label="Menu" style="margin-left: auto; width: 44px; height: 44px; border: none; border-radius: 10px; background: none; cursor: pointer; display: grid; place-items: center;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1C1B19" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+    </button>
+  </div>
+
+  <div style="flex: 1; overflow: hidden; padding: 0 16px; display: flex; flex-direction: column; gap: 12px;">
+
+    <section aria-label="Where to go" style="background: #1C1B19; color: #FFFDF8; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 14px; color: #CFC6B6;">Take her to</span>
+      <h1 style="margin: 0; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em;">Jayanagar Heart and Stroke Centre</h1>
+      <span style="font-size: 14px; color: #CFC6B6;">Emergency entrance, 30th Cross. Resus bay 2 is ready.</span>
+      <div style="display: flex; align-items: baseline; gap: 6px;">
+        <span style="font-size: 44px; line-height: 1; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums;">6</span>
+        <span style="font-size: 16px; color: #CFC6B6;">min, 3.1 km, siren on</span>
+      </div>
+      <a href="#" style="height: 52px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; background: #FFFDF8; color: #1C1B19; font-size: 16px; font-weight: 600; text-decoration: none;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1C1B19" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8z"></path></svg>
+        Open navigation
+      </a>
+    </section>
+
+    <section aria-label="Patient" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">Asha Rao, 68 F</h2>
+        <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 6px; background: #F8DEDD; color: #A3231F; font-size: 12px; font-weight: 600;">Critical</span>
+      </div>
+      <span style="display: inline-flex; align-self: flex-start; align-items: center; height: 28px; padding: 0 10px; border: 1.5px solid #C62D33; border-radius: 6px; color: #A3231F; font-size: 13px; font-weight: 600;">Allergic to penicillin</span>
+      <span style="font-size: 14px; color: #4A463F; line-height: 1.45;">High blood pressure, type 2 diabetes. Metformin, amlodipine, atorvastatin.</span>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #EFE9DE; border-radius: 10px; overflow: hidden;">
+        <sc-for list="{{ vitals }}" as="v" hint-placeholder-count="6">
+          <div style="background: #FFFDF8; padding: 8px 10px; display: flex; flex-direction: column;">
+            <span style="font-size: 11px; color: #6B655B;">{{ v.label }}</span>
+            <span style="font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ v.color }};">{{ v.value }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" style="flex: 1; height: 44px; border: 1px solid #CFC6B6; border-radius: 10px; background: #FFFDF8; font: inherit; font-size: 14px; font-weight: 600; color: #1C1B19; cursor: pointer;">Add a reading</button>
+        <button type="button" style="flex: 1; height: 44px; border: 1px solid #CFC6B6; border-radius: 10px; background: #FFFDF8; font: inherit; font-size: 14px; font-weight: 600; color: #1C1B19; cursor: pointer;">Add treatment</button>
+      </div>
+    </section>
+
+    <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #E5F0E9; border-radius: 12px; font-size: 14px; color: #1D5E3A;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#23774A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>
+      Handover sent to the hospital at 19:46
+    </div>
+  </div>
+
+  <div style="padding: 12px 16px 20px; display: flex; flex-direction: column; gap: 8px; background: #F6F3EC; border-top: 1px solid #E3DCCF;">
+    <button type="button" style="height: 58px; border: none; border-radius: 14px; background: #B84D18; color: #FFFFFF; font: inherit; font-size: 17px; font-weight: 600; cursor: pointer;">Arrived at the hospital</button>
+    <a href="#" style="height: 44px; display: flex; align-items: center; justify-content: center; color: #8F3A10; font-size: 15px; font-weight: 600; text-decoration: none;">Call the control room</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      vitals: [
+        { label: 'Heart rate', value: '116', color: '#934006' },
+        { label: 'BP', value: '98/62', color: '#934006' },
+        { label: 'SpO2', value: '95%', color: '#1C1B19' },
+        { label: 'Breathing', value: '24', color: '#A3231F' },
+        { label: 'Temp', value: '38.9', color: '#6F5300' },
+        { label: 'NEWS2', value: '13', color: '#A3231F' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

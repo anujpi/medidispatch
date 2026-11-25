@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patient: help is on the way</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8F3A10}a:hover{color:#6E2C0B}
+a:focus-visible,button:focus-visible{outline:2px solid #2F5E9E;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F3EC; color: #1C1B19; font-family: Inter, system-ui, sans-serif; font-size: 15px; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; gap: 10px; padding: 16px 20px 8px;">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#C62D33"></rect><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#FFFFFF"></path></svg>
+    <span style="font-size: 15px; font-weight: 600;">Hello, Asha</span>
+    <span style="margin-left: auto; font-size: 13px; color: #6B655B; font-variant-numeric: tabular-nums;">19:34</span>
+  </div>
+
+  <div style="flex: 1; overflow: hidden; padding: 8px 16px 0; display: flex; flex-direction: column; gap: 12px;">
+
+    <section aria-labelledby="help-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 18px; overflow: hidden;">
+      <div style="position: relative; height: 150px; background: #ECE7DC;">
+        <svg width="100%" height="150" viewBox="0 0 358 150" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <g fill="none" stroke="#FFFFFF" stroke-linecap="round"><path d="M-10 110C80 90 160 100 230 70S330 30 370 20" stroke-width="6"></path><path d="M60 -10C70 50 90 100 80 160" stroke-width="4"></path><path d="M200 -10c0 50 20 90 60 160" stroke-width="4"></path></g>
+          <path d="M70 100L120 96L170 88L230 70L272 50" fill="none" stroke="#2F5E9E" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 9"></path>
+          <rect x="64" y="94" width="14" height="14" rx="3" fill="#2F5E9E" stroke="#FFFDF8" stroke-width="2"></rect>
+          <circle cx="272" cy="50" r="9" fill="#C62D33" stroke="#FFFDF8" stroke-width="3"></circle>
+        </svg>
+        <span style="position: absolute; right: 12px; top: 12px; padding: 4px 8px; border-radius: 6px; background: rgba(255,253,248,0.92); font-size: 12px; color: #4A463F;">You</span>
+      </div>
+      <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 8px;">
+        <h1 id="help-title" style="margin: 0; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em;">An ambulance is coming to you</h1>
+        <div style="display: flex; align-items: baseline; gap: 6px;">
+          <span style="font-size: 40px; line-height: 1; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums;">7</span>
+          <span style="font-size: 16px; color: #4A463F;">min, about 19:41</span>
+        </div>
+        <span style="font-size: 14px; color: #4A463F; line-height: 1.5;">Sunita Das, paramedic, and Ravi Kumar, in ambulance KA 01 AB 4321. Your son Rohan has been told.</span>
+      </div>
+    </section>
+
+    <section aria-labelledby="wait-title" style="background: #FFFDF8; border: 1px solid #E3DCCF; border-radius: 18px; padding: 16px 20px;">
+      <h2 id="wait-title" style="margin: 0 0 10px; font-size: 16px; font-weight: 600;">While you wait</h2>
+      <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 15px;">
+        <li style="display: flex; gap: 10px;"><span style="width: 6px; height: 6px; margin-top: 9px; flex: none; border-radius: 50%; background: #1C1B19;"></span>Unlock the front door if you can.</li>
+        <li style="display: flex; gap: 10px;"><span style="width: 6px; height: 6px; margin-top: 9px; flex: none; border-radius: 50%; background: #1C1B19;"></span>Sit or lie down. Do not eat or drink.</li>
+        <li style="display: flex; gap: 10px;"><span style="width: 6px; height: 6px; margin-top: 9px; flex: none; border-radius: 50%; background: #1C1B19;"></span>Keep your medicines close. The crew already has your list.</li>
+      </ul>
+    </section>
+
+    <a href="#" style="height: 56px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 14px; background: #B84D18; color: #FFFFFF; font-size: 17px; font-weight: 600; text-decoration: none;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"></path></svg>
+      Talk to the control room
+    </a>
+  </div>
+
+  <nav aria-label="App" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; border-top: 1px solid #E3DCCF; background: #FFFDF8;">
+    <a href="#" aria-current="page" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #1C1B19; font-size: 12px; font-weight: 600; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1C1B19" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9H3z"></path></svg>Now</a>
+    <a href="#" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #6B655B; font-size: 12px; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6B655B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"></path></svg>My vitals</a>
+    <a href="#" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #6B655B; font-size: 12px; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6B655B" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"></path><path d="M14 2v6h6"></path></svg>Records</a>
+    <a href="#" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #6B655B; font-size: 12px; text-decoration: none;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6B655B" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1-4 4-6 8-6s7 2 8 6"></path></svg>Family</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
