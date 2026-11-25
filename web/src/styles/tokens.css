@@ -1,0 +1,118 @@
+/*
+  Design tokens. Every colour, size and font the apps use; components use var(--...) only.
+
+  Principles (from control-room HMI practice, ISA-101, and product UI practice):
+  - A NEUTRAL base: surfaces are quiet tones of the theme's base colour. Colour is reserved for what needs
+    attention (urgency, faults), so a critical case stands out even in the corner of the eye.
+  - The ACCENT is only for interaction: the primary button, links, focus, the selected item.
+  - Hierarchy comes from weight and tone first, size second: labels are small and muted, data is solid.
+  - Urgency is always written as well as coloured.
+
+  Three themes (header picker, remembered): paper (cream, ink, burnt orange; the default), navy (navy, white,
+  hot pink), charcoal (charcoal, sand, electric blue).
+
+  Type: Inter (variable), self-hosted. Tabular numbers everywhere so columns of minutes line up.
+*/
+:root,
+:root[data-theme="cream"] {
+  color-scheme: light;
+  --bg: #f6f3ec;
+  --surface: #fdfbf7;
+  --surface-2: #efebe2;
+  --hover: #f3efe6;
+  --line: #e3ddd0;
+  --line-strong: #d3cbb9;
+  --text: #1c1b19;
+  --text-2: #4a463f;
+  --muted: #7d776b;
+  --accent: #b84d18;
+  --accent-hover: #9e4113;
+  --on-accent: #fffaf3;
+  --link: #9e4113;
+  --focus: #b84d18;
+  --shadow: 0 1px 2px rgba(28, 27, 25, .06), 0 1px 1px rgba(28, 27, 25, .04);
+
+  --critical: #d13438;
+  --high: #d9650b;
+  --medium: #b98900;
+  --low: #7d776b;
+  --ok: #2b8a57;
+  --busy: #3867a8;
+}
+
+:root[data-theme="navy"] {
+  color-scheme: dark;
+  --bg: #0b1222;
+  --surface: #101a2e;
+  --surface-2: #16223b;
+  --hover: #142038;
+  --line: #1e2b47;
+  --line-strong: #2a3a5c;
+  --text: #eef1f8;
+  --text-2: #c3cbdd;
+  --muted: #8592ae;
+  --accent: #ff4fa3;
+  --accent-hover: #ff73b6;
+  --on-accent: #1a0b14;
+  --link: #ff85bf;
+  --focus: #ff4fa3;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+
+  --critical: #ff5c5f;
+  --high: #ff9447;
+  --medium: #f5c542;
+  --low: #8592ae;
+  --ok: #3fcf8e;
+  --busy: #7aa7ff;
+}
+
+:root[data-theme="charcoal"] {
+  color-scheme: dark;
+  --bg: #18191b;
+  --surface: #1f2023;
+  --surface-2: #27292d;
+  --hover: #24262a;
+  --line: #2e3035;
+  --line-strong: #3b3e44;
+  --text: #ece2cf;
+  --text-2: #c9bea9;
+  --muted: #8f8778;
+  --accent: #3b82ff;
+  --accent-hover: #5c97ff;
+  --on-accent: #ffffff;
+  --link: #79a8ff;
+  --focus: #3b82ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35);
+
+  --critical: #ff5c5f;
+  --high: #ff9447;
+  --medium: #f0c445;
+  --low: #8f8778;
+  --ok: #46c98a;
+  --busy: #79a8ff;
+}
+
+:root {
+  --font: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* a tight type scale: labels 12, body 13-14, titles 20-28 */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 32px;
+  --s8: 48px;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --control: 32px;    /* height of buttons and inputs */
+}

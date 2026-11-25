@@ -144,7 +144,7 @@ flowchart TB
 | `dispatch-service` | Spring Boot application: wiring, `DispatchService`, REST API, live feed, database adapters |
 | `dispatch-sim` | Synthetic patients and moving units: a planned two-hour run and an endless live city |
 | `dispatch-sim-fx` | JavaFX window showing the live simulated city |
-| web app (planned) | One React + TypeScript app with four faces: control room, crew, patient, hospital |
+| `web/` | React + TypeScript app (Vite) with four faces: control room, crew, patient, hospital |
 
 ## Tech stack
 
@@ -283,7 +283,9 @@ The crews take serious patients to hospital: after their time on scene, an ambul
 
 **Routing has started: Bangalore's real roads as a graph.** Today everything moves and is measured in straight lines, so the nearest ambulance "as the crow flies" can be on the wrong side of a lake. The new `dispatch-routing` module turns OpenStreetMap's road data for Bangalore (about 400,000 road points and 860,000 one-direction road pieces, one-way streets and roundabouts included) into a compact graph stored in arrays, keeps only the part where every point can be driven to and back (98.8% of it), and can snap any address to the nearest road. The fastest route on it works too, with Dijkstra's algorithm and A* written from scratch, minimising travel time rather than distance (a longer main road beats a shorter lane). On the real graph, Koramangala to Jayanagar is 3.5 km as the crow flies but 6.5 km and 8.4 minutes by road, found in about 5 ms; right across the city, Electronic City to Hebbal, takes about 50 ms. A* finds exactly Dijkstra's answer while exploring 1.7 to 2.2 times fewer junctions; a better estimate (landmarks) is planned to cut that much further. Traffic is modelled too: roads slow down by time of day on a Bangalore weekday curve (main roads at 40% of their speed at the 6 pm peak, lanes much less), incidents can jam or close an area, and an ambulance with its siren on moves faster than the traffic but never faster than is safe. Live traffic is paid data, so this is a model the router plugs into the same way. On the real graph the same Koramangala to Jayanagar trip takes 8.4 minutes at 3 am on the main roads, but 15.6 minutes at 9:30 on a different, shorter route through smaller roads (12 minutes for an ambulance), and a closed road is simply driven around. **The engine now decides by road.** The five nearest free units are re-ranked by drive time in the current traffic, so the ambulance that gets there first is sent, not the one closest as the crow flies; the first-responder check, the choice of hospital and the hospital's arrival estimate use drive times too. The engine only asks "how long from here to there?", so it still runs on straight lines in the tests and the simulator, and the service falls back to them (with a warning) if the road graph file is missing. **And the city now drives on the roads too.** The service answers "what is the way from here to there?" (`GET /api/route`), and the simulated crews ask it for every leg, to the patient, to the hospital and home, the way a crew's phone asks for navigation. Each unit drives its route at the route's own pace, so it arrives when the service's estimate said it would. The map draws the road still ahead of each unit, shrinking as it drives. Jams and closures can be added and removed while the city runs (`/api/incidents`); the map shows them as circles, and routes planned from then on go round them (a unit already on its way keeps its route for now).
 
-Next after routing: security (login, roles, and each hospital seeing only its own patients and units). Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
+**The web app has started.** A React + TypeScript app in `web/` has a start page and the four faces: the control room (a summary strip, every open case most urgent first, and the fleet, live every second), a hospital's arriving patients, a crew's current call and a patient's own status. It is calm by design, following control-room display guidance: neutral surfaces, with colour kept for urgency and alarms, so a critical patient waiting for a unit stands out at a glance. It comes in three colour themes.
+
+Next: the control room's map, alerts and actions, then security (login, roles, and each hospital seeing only its own patients and units). Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
 `SimpleScorer` is a deliberate **placeholder, not clinical**; it exists so the rest of the engine can be built and tested. It will be replaced by a NEWS2-based scorer.
 
@@ -327,7 +329,8 @@ Next after routing: security (login, roles, and each hospital seeing only its ow
 - [x] Hospitals and clinics: registry and destination choice (engine)
 - [x] Hospitals: transport to hospital, hospital endpoints, pre-alert
 - [ ] The simulator driving the running service over HTTP
-- [ ] Web app (React + TypeScript PWA): control room, crew, patient and hospital faces
+- [x] Web app skeleton (React + TypeScript): the four faces, read-only, live control room
+- [ ] Web app: map, alerts and actions in the control room; crew PWA; hospital panel
 - [ ] OTP login, JWT and roles
 - [ ] Docker Compose for the whole stack
 - [ ] Weak-network testing; demo
@@ -398,6 +401,19 @@ Dispatcher dispatcher = new Dispatcher(queue, patients, resources, claimer,
 Optional<Assignment> assignment = dispatcher.dispatchNext();
 ```
 
+### The web app
+
+Requires Node.js. With the service running on port 8080:
+
+```
+cd web
+npm install
+npm run dev      # http://localhost:5173
+npm test
+```
+
+The dev server forwards `/api` to the service, so the browser talks to a single address.
+
 ## Repository layout
 
 ```
@@ -448,8 +464,7 @@ medidispatch/
     src/main/resources/db/migration/
                               V1__init.sql (the database schema, applied by Flyway)
   BACKLOG.md                  known gaps to tackle later
-  (planned)
-  web/                        React + TypeScript PWA (control room, crew, patient, hospital)
+  web/                        React + TypeScript app (control room, crew, patient, hospital)
 ```
 
 ## Testing

@@ -703,7 +703,8 @@ over HTTP, building a BANGALORE city (real coordinates, made-up hospital names a
 hospitals/clinics with drivers, transport, return to base: a simulator-only behaviour, the unit is AVAILABLE while
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
-S1, S2, M1, routing R1-R5 and M1b are done; next the user wants to BUILD THE APPLICATION. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+S1, S2, M1, routing R1-R5, M1b and A1 (web app skeleton, see "Web app") are done; next A2 (control room map,
+alerts, case detail, actions), then SEC. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
 (map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
 console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
 only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
@@ -904,3 +905,24 @@ routes and the map draws them.
 - Test: ApiTest.theLiveMapPageIsServed (200, listens to /api/live, uses OpenStreetMap tiles, fetches /api/route and
   /api/incidents, has the layer switcher and the four styles).
 BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week 3: RiskScorer makes it a drop-in.
+
+## Web app (A1 DONE), folder web/ (not a Maven module)
+- Created by the user with IntelliJ's Vite generator (React + TypeScript, ESLint). React 19.3, Vite 8.3, TS 6.0
+  (erasableSyntaxOnly: no parameter properties), ESLint 10, react-router 8.5 (everything from 'react-router';
+  react-router-dom is gone in v8), Vitest 5.1 + jsdom + Testing Library, @fontsource-variable/inter
+  ('Inter Variable'), lucide-react (has Hospital, not Building2). npm is not on PowerShell's PATH: use Bash.
+- Run: `npm run dev` in web/ (http://localhost:5173), the service on 8080. Vite proxies /api to 8080, so the
+  browser sees one origin: no CORS. `npm test` (vitest run), `npm run lint`, `npm run build`.
+- Routes (src/routes.tsx): / start page, /control, /hospital/:facilityId, /crew/:unitId, /patient/:patientId, *.
+  Until SEC, the hospital/unit/patient is chosen on the start page.
+- src/api: types.ts (hand-written DTOs), client.ts (ApiError; network failure or 502/503/504 = status 0
+  "unreachable"; ProblemDetail detail/title as message), useLiveSnapshot (EventSource /api/live "snapshot"),
+  usePolling(key, load, ms) (resets on key change, ignores late answers). src/labels.ts: words for enums.
+- Design (5 rounds driven by the user; NOT a government look, no State Emblem). Current: ISA-101 / Refactoring UI /
+  Linear: neutral base, colour only for urgency and alarms, hierarchy by weight and tone, Inter, panels and real
+  tables, tinted dot badges, a red edge on critical rows, waiting time red when CRITICAL and unassigned >= 2 min.
+  Three themes in src/styles/tokens.css (data-theme on <html>, saved in localStorage "medidispatch.theme"):
+  cream (cream, ink, burnt orange; default, light), navy (navy, white, hot pink), charcoal (charcoal, sand,
+  electric blue). --link separate from --accent for contrast; tabular-nums only on .time/.metricValue/.clock
+  (Inter widens hyphens in "als-1" otherwise). CSS Modules per folder (components/, pages/).
+- Tests (20): client 6, useLiveSnapshot 4, pages 10 (FakeEventSource + fakeFetch in src/test/fakes.ts).

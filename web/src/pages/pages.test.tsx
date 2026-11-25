@@ -1,0 +1,160 @@
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AppRoutes } from '../routes'
+import { FakeEventSource, fakeFetch, sampleSnapshot } from '../test/fakes'
+import type { FacilityInfo, InboundPatient } from '../api/types'
+
+// renders the whole app at one address, the way the browser would open it
+function openAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AppRoutes />
+    </MemoryRouter>,
+  )
+}
+
+// the panel with this heading
+function section(heading: string) {
+  return within(screen.getByRole('region', { name: heading }))
+}
+
+// a panel's table rows, without the header row
+function bodyRows(heading: string) {
+  return section(heading).getAllByRole('row').slice(1)
+}
+
+const JAYANAGAR: FacilityInfo = {
+  id: 'blr-h-jayanagar', name: 'Jayanagar Heart & Stroke Centre', kind: 'HOSPITAL', latitude: 12.925,
+  longitude: 77.5938, capabilities: ['STROKE', 'CARDIAC'], accepting: true, phone: '+91 80 4100 1002',
+}
+
+const ASHA: InboundPatient = {
+  tripId: 't-1', caseId: 'c-1', patientId: 'p001', patientName: 'Asha Rao', age: 68, sex: 'FEMALE',
+  band: 'CRITICAL', needs: ['STROKE'], unitId: 'als-1', unitType: 'AMBULANCE_ALS', latitude: 12.93,
+  longitude: 77.6, distanceKm: 3.2, etaMinutes: 7, latestVitals: null,
+}
+
+describe('the hospital page', () => {
+  it('shows the hospital and its arrivals board', async () => {
+    vi.stubGlobal('fetch', fakeFetch({
+      '/api/facilities/blr-h-jayanagar': [200, JAYANAGAR],
+      '/api/facilities/blr-h-jayanagar/inbound': [200, [ASHA]],
+    }))
+
+    openAt('/hospital/blr-h-jayanagar')
+
+    expect(await screen.findByRole('heading', { name: 'Jayanagar Heart & Stroke Centre' })).toBeInTheDocument()
+    expect(screen.getByText('Accepting patients')).toBeInTheDocument()
+    const [row] = bodyRows('Arrivals')
+    expect(row).toHaveTextContent('Asha Rao')
+    expect(row).toHaveTextContent('68 F')
+    expect(within(row).getByTitle('Estimated arrival')).toHaveTextContent('7min')
+    expect(row).toHaveTextContent('Critical')
+    expect(row).toHaveTextContent('Stroke')
+  })
+
+  it('says so for a hospital that does not exist', async () => {
+    vi.stubGlobal('fetch', fakeFetch({}))
+
+    openAt('/hospital/nowhere')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No hospital with the id "nowhere"')
+  })
+
+  it('says the service is unreachable when it is down', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+
+    openAt('/hospital/blr-h-jayanagar')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot reach the dispatch service')
+  })
+})
+
+describe('the control room', () => {
+  beforeEach(() => FakeEventSource.install())
+
+  it('lists the most urgent case first, with how long it has waited and its unit', () => {
+    openAt('/control')
+    expect(screen.getByText('Connecting to the live feed')).toBeInTheDocument()
+
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Live')
+    const rows = bodyRows('Open cases')
+    expect(rows[0]).toHaveTextContent('Asha Rao')            // Critical, opened later
+    expect(rows[0]).toHaveTextContent('als-1')
+    expect(rows[0]).toHaveTextContent('5min')                // opened 12:55, picture taken 13:00
+    expect(rows[1]).toHaveTextContent('Meena Iyer')          // Medium, opened earlier
+    expect(rows[1]).toHaveTextContent('Awaiting unit')
+  })
+
+  it('sums up the city and lists the fleet, busy units first', () => {
+    openAt('/control')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    const summary = screen.getByLabelText('City summary')
+    expect(summary).toHaveTextContent('Units free1of 2')
+    expect(summary).toHaveTextContent('Critical1')
+    expect(summary).toHaveTextContent('Awaiting a unit1')
+    const fleet = bodyRows('Fleet')
+    expect(fleet[0]).toHaveTextContent('als-1')
+    expect(fleet[0]).toHaveTextContent('On a trip')
+    expect(fleet[1]).toHaveTextContent('Free')
+  })
+})
+
+describe('the crew page', () => {
+  beforeEach(() => FakeEventSource.install())
+
+  it('shows the unit and its trip', () => {
+    openAt('/crew/als-1')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    expect(screen.getByRole('heading', { name: 'als-1' })).toBeInTheDocument()
+    expect(screen.getByText('Go to the patient')).toBeInTheDocument()
+    expect(screen.getByText('Asha Rao')).toBeInTheDocument()
+  })
+
+  it('says when there is no such unit', () => {
+    openAt('/crew/als-99')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    expect(screen.getByText('No unit with the id "als-99"')).toBeInTheDocument()
+  })
+})
+
+describe('the patient page', () => {
+  it('a patient without an open case is fine, not an error', async () => {
+    vi.stubGlobal('fetch', fakeFetch({
+      '/api/patients/p001': [200, { id: 'p001', latitude: 12.9, longitude: 77.6, name: 'Asha Rao', age: 68,
+        sex: 'FEMALE', emergencyContact: null }],
+    }))
+
+    openAt('/patient/p001')
+
+    expect(await screen.findByText('No alerts')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('addresses', () => {
+  it('an unknown address shows "page not found"', () => {
+    openAt('/nowhere/at/all')
+
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+  })
+})
+
+describe('the colour theme', () => {
+  it('switches when a swatch is clicked, and is remembered', () => {
+    openAt('/nowhere')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navy, white and hot pink' }))
+
+    expect(document.documentElement.dataset.theme).toBe('navy')
+    expect(localStorage.getItem('medidispatch.theme')).toBe('navy')
+    expect(screen.getByRole('button', { name: 'Navy, white and hot pink' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Cream, ink and burnt orange' })).toHaveAttribute('aria-pressed', 'false')
+  })
+})

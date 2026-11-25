@@ -86,6 +86,15 @@ Ordered roughly by priority inside each group.
       after about 30 s of pause. A service-side "simulation paused" switch would fix it; the real system never
       pauses, so only if pausing becomes important.
 
+## Web app
+
+- [ ] **Generated API types.** `web/src/api/types.ts` is written by hand and can drift from the Java records;
+      generate it from an OpenAPI description of the service.
+- [ ] **One live feed per tab.** Each screen using `useLiveSnapshot` opens its own EventSource; share one
+      through a React context once several components on a page need it.
+- [ ] **Cream theme: "High" is close to the accent.** The high-priority orange and the burnt-orange accent are
+      similar; shift one if it confuses anyone.
+
 ## Small cleanups
 
 - [ ] Delete `engine/ResponseTypes.java` (unused since the response ladder).

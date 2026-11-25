@@ -214,7 +214,8 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
 - [ ] security moved up: login, roles, hospital scoping (L; it was in week 2)
 
 ### Week 2, Nov 26–Dec 2: the screens
-- [ ] React + TS + Vite app, routes for the four faces, API client, design tokens (F) — CORS lesson (L)
+- [x] A1: React + TS + Vite app (web/), routes for the four faces, API client, live feed hook, three colour
+      themes, first read-only screens (F); CORS avoided with Vite's dev proxy
 - [ ] control room: map, queue, alerts, override, live via SSE (F for the UI, L for the live data)
 - [ ] OTP login, JWT, roles (L)
 - [ ] crew PWA: manifest, service worker, trip flow, GPS, vitals, quick messages (F) — TLS on the LAN lesson (L)

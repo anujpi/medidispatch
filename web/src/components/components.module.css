@@ -1,0 +1,238 @@
+/* The shared components' styles (CSS Modules: class names are local to this file). */
+
+/* ---- AppShell ---- */
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: 52px;
+  padding: 0 var(--s6);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand:hover {
+  text-decoration: none;
+}
+
+.logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+
+/* the page's place, as a breadcrumb: MediDispatch > Control room */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.crumbIcon {
+  color: var(--muted);
+}
+
+.headerEnd {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: var(--s7) var(--s6) var(--s8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s6);
+}
+
+.wide {
+  max-width: 1600px;
+}
+
+/* ---- Clock ---- */
+.clock {
+  font-variant-numeric: tabular-nums;     /* the seconds do not make the clock jitter */
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.zone {
+  margin-left: var(--s1);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* ---- ConnectionBadge: a small pill ---- */
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.connection::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--critical);
+}
+
+.live {
+  color: var(--text-2);
+}
+
+.live::before {
+  background: var(--ok);
+}
+
+/* ---- ThemePicker: a compact segmented control of three small swatches ---- */
+.themes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.swatch::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15);
+}
+
+.swatch:hover {
+  background: var(--hover);
+}
+
+.swatch[aria-pressed="true"] {
+  background: var(--surface-2);
+}
+
+.cream::after { background: linear-gradient(135deg, #f6f3ec 50%, #b84d18 50%); }
+.navy::after { background: linear-gradient(135deg, #0b1222 50%, #ff4fa3 50%); }
+.charcoal::after { background: linear-gradient(135deg, #18191b 50%, #3b82ff 50%); }
+
+/* ---- ErrorPanel ---- */
+.error {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4);
+  border: 1px solid color-mix(in srgb, var(--critical) 35%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--critical) 6%, var(--surface));
+}
+
+.errorIcon {
+  flex: none;
+  color: var(--critical);
+  margin-top: 2px;
+}
+
+.error strong {
+  display: block;
+  font-weight: 600;
+}
+
+.error p {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ---- TriageTag: a tinted badge with a dot ---- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 var(--s2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.CRITICAL { color: var(--critical); background: color-mix(in srgb, var(--critical) 13%, transparent); }
+.HIGH { color: var(--high); background: color-mix(in srgb, var(--high) 13%, transparent); }
+.MEDIUM { color: var(--medium); background: color-mix(in srgb, var(--medium) 14%, transparent); }
+.LOW { color: var(--muted); background: var(--surface-2); }
+
+/* a case still waiting for a unit: the dot pulses, the only motion on these screens */
+.waiting::before {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 25%, transparent); }
+}
+
+/* phones: drop the clock and the brand's words so the header fits */
+@media (max-width: 560px) {
+  .header { padding: 0 var(--s4); }
+  .clock { display: none; }
+  .brandText {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
