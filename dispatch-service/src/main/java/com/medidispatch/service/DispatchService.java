@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -468,6 +469,30 @@ public class DispatchService {
      */
     public synchronized Optional<CaseInfo> findCase(String caseId) {
         return tx.execute(status -> cases.findById(caseId).map(c -> caseInfo(c)));
+    }
+
+    /** The longest stretch of vitals history one request may ask for. */
+    public static final int MAX_HISTORY_HOURS = 72;
+
+    /**
+     * A patient's vitals over the last hours, oldest first: the trend lines on the patient file.
+     *
+     * @param patientId the patient
+     * @param hours     how far back, 1 to {@link #MAX_HISTORY_HOURS}
+     * @return the readings in time order
+     * @throws NotFoundException        if there is no such patient
+     * @throws IllegalArgumentException if {@code hours} is out of range
+     */
+    public synchronized List<VitalsReading> vitalsOf(String patientId, int hours) {
+        if (hours < 1 || hours > MAX_HISTORY_HOURS) {
+            throw new IllegalArgumentException("hours must be 1 to " + MAX_HISTORY_HOURS + ", got " + hours);
+        }
+        return tx.execute(status -> {
+            if (patients.findById(patientId).isEmpty()) {
+                throw new NotFoundException("Patient " + patientId + " not found");
+            }
+            return vitals.historyFor(patientId, clock.instant().minus(Duration.ofHours(hours)));
+        });
     }
 
     /**

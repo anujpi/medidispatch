@@ -12,8 +12,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * HTTP endpoints for the patient side: registering patients, their vitals readings and their cases.
@@ -59,7 +62,21 @@ public class PatientController {
     }
 
     /**
-     * {@code GET /api/patients/{id}/case}: the patient's open case. 404 if they have none.
+     * {@code GET /api/patients/{id}/vitals?hours=6}: the patient's readings over the last hours, oldest first (the
+     * trend lines on the patient file). 404 for an unknown patient, 400 for hours outside 1 to 72.
+     *
+     * @param id    the patient
+     * @param hours how far back; 6 if not given
+     * @return the readings
+     */
+    // ponytail: health data with no login in front of it yet, like the record above (the security piece).
+    @GetMapping("/patients/{id}/vitals")
+    public List<VitalsReading> vitals(@PathVariable String id, @RequestParam(defaultValue = "6") int hours) {
+        return service.vitalsOf(id, hours);
+    }
+
+    /**
+     * {@code GET /api/patients/{id}/case}: the patient's open case. 404 when there is none (or no such patient).
      *
      * @param id the patient
      * @return the open case

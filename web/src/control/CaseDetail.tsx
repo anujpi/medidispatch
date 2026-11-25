@@ -1,17 +1,16 @@
-import { useEffect, useRef } from 'react'
 import { Phone, X } from 'lucide-react'
+import { Link } from 'react-router'
 import { getJson } from '../api/client'
-import type { CaseInfo, LiveSnapshot, RouteInfo, TripInfo } from '../api/types'
+import type { CaseInfo, LiveSnapshot, TripInfo, VitalsReading } from '../api/types'
+import { useDriveMinutes } from '../api/useDriveMinutes'
 import { usePolling } from '../api/usePolling'
 import { TriageTag } from '../components/TriageTag'
+import { VitalsGrid } from '../components/VitalsGrid'
 import { CASE_STATUS, NEED, TRIP_STATUS, UNIT_TYPE, clockTime, minutesBetween } from '../labels'
-import { routeQuery, type LatLon } from '../map/routes'
+import type { LatLon } from '../map/routes'
 import styles from '../pages/pages.module.css'
 import css from './control.module.css'
 import { CaseActions, OutOfService } from './CaseActions'
-
-/** How often a unit's arrival estimate is asked again. */
-const ETA_EVERY_MS = 10_000
 
 /**
  * The picked case, as a card over the map: who the patient is, how long they have waited, and every unit on the
@@ -43,6 +42,9 @@ export function CaseDetail({ snapshot, openCase, onClose }: {
         <dt>Opened</dt>
         <dd>{clockTime(c.openedAt)} <span className={styles.muted}>({waited} min ago)</span></dd>
       </dl>
+      <h3 className={css.detailSub}>Vitals now</h3>
+      <LatestVitals patientId={c.patientId} />
+      <p className={css.fileLink}><Link to={`/control/patients/${encodeURIComponent(c.patientId)}`}>Open patient file</Link></p>
       <h3 className={css.detailSub}>Units</h3>
       {trips.length === 0 && (
         <p className={css.detailNote}>No unit yet. The nearest free unit is sent as soon as one is available.</p>
@@ -85,15 +87,17 @@ function UnitOnCase({ trip, snapshot, openCase }: { trip: TripInfo; snapshot: Li
   )
 }
 
-// the drive time from where the unit is now to where it is going, by road with the siren on, asked every 10 s
+// the newest reading of the last hour, asked every 15 s
+function LatestVitals({ patientId }: { patientId: string }) {
+  const vitals = usePolling(`latest|${patientId}`,
+    () => getJson<VitalsReading[]>(`/api/patients/${encodeURIComponent(patientId)}/vitals?hours=1`), 15_000)
+  const readings = vitals.data ?? []
+  return <VitalsGrid latest={readings.length > 0 ? readings[readings.length - 1] : null} size="small" />
+}
+
+// the drive time to where the unit is going
 function Eta({ tripKey, from, to }: { tripKey: string; from: LatLon; to: LatLon }) {
-  const where = useRef({ from, to })
-  useEffect(() => {
-    where.current = { from, to }
-  })
-  const route = usePolling(tripKey,
-    () => getJson<RouteInfo>('/api/route?' + routeQuery(where.current.from, where.current.to)), ETA_EVERY_MS)
-  const minutes = route.data ? Math.max(1, Math.ceil(route.data.seconds / 60)) : null
+  const minutes = useDriveMinutes(tripKey, from, to)
   return (
     <span className={css.eta} title="Estimated drive time">
       {minutes === null ? '…' : <><span className={styles.time}>{minutes}</span><span className={styles.timeUnit}>min</span></>}

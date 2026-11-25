@@ -219,8 +219,11 @@ later. **Doctors:** sign up, licence number, admin approval, on/off duty, remote
 - [x] control room: map, queue, alerts, override, live via SSE (A2a map, A2b alerts + case card, A2c operator
       overrides: cancel a case, send a chosen unit, take a unit out of service)
 - [ ] OTP login, JWT, roles (L)
-- [ ] crew PWA: manifest, service worker, trip flow, GPS, vitals, quick messages (F) — TLS on the LAN lesson (L)
-- [ ] hospital panel: incoming, ETA, vitals, SBAR (F)
+- [x] screens Step 1 (F): patient file with vitals trends, hospital arrivals with countdown and diversion switch,
+      crew phone with working steps, patient phone; design canvas for the rest
+- [ ] crew PWA: manifest, service worker, GPS, offline, quick messages (F) — TLS on the LAN lesson (L)
+- [ ] hospital panel: SBAR handover, beds and teams, patient received (F)
+- [ ] medical record (allergies, conditions, medicines, reports) and NEWS2 in the engine (L)
 
 ### Week 3, Dec 3–8: the smart parts and the finish
 - [ ] NEWS2 scorer (L)

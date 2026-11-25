@@ -310,3 +310,11 @@ button.alertText:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* the link from the case card to the full patient file */
+.fileLink {
+  margin: 0;
+  padding: var(--s2) var(--s5) var(--s1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}

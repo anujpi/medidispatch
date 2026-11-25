@@ -78,6 +78,12 @@
   max-width: 1600px;
 }
 
+/* the crew and patient screens: a phone-width column, also on a desktop */
+.narrowMain {
+  max-width: 480px;
+  padding-top: var(--s5);
+}
+
 /* ---- Clock ---- */
 .clock {
   font-variant-numeric: tabular-nums;     /* the seconds do not make the clock jitter */

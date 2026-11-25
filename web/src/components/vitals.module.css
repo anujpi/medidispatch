@@ -1,0 +1,115 @@
+/* VitalsGrid: big tabular numbers in a hairline grid (the 1px gaps show the line colour). */
+/* six vitals: three columns, so two full rows and never a lone cell beside an empty one */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+}
+
+@media (max-width: 520px) {
+  .grid:not(.small) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* the small grid stays three across, even on a phone: the unit goes under the number to make room */
+.small .unit {
+  display: block;
+  margin-left: 0;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--s4) var(--s5);
+  background: var(--surface);
+}
+
+.small .cell {
+  gap: 0;
+  padding: var(--s2) var(--s3);
+}
+
+.label {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.small .label {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.grid dd {
+  margin: 0;
+}
+
+.value {
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.small .value {
+  font-size: 19px;
+}
+
+.word {
+  font-size: var(--fs-xl);
+  white-space: normal;
+}
+
+.small .word {
+  font-size: var(--fs-md);
+}
+
+/* outside the normal range: the warning colour (the text below also says it, colour is never the only sign) */
+.off {
+  color: var(--high);
+}
+
+.unit {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.trend svg {
+  display: block;
+  width: 100%;
+  height: 34px;
+}
+
+.trend polyline {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.note {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.none {
+  margin: 0;
+  padding: var(--s4) var(--s5);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

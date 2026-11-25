@@ -1,0 +1,520 @@
+/* The patient file, the hospital arrivals board and the two phone screens (crew, patient). */
+
+/* ---- patient file ---- */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s4) var(--s7);
+  padding: var(--s5) var(--s6);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.avatar {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-2);
+}
+
+.contact {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.contact a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.caseBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s5);
+  padding: var(--s3) var(--s6);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+
+.caseBar strong {
+  color: var(--text);
+}
+
+.caseCritical {
+  background: color-mix(in srgb, var(--critical) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--critical) 30%, var(--line));
+}
+
+.noCase {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s5);
+  align-items: flex-start;
+}
+
+.mainColumn {
+  flex: 999 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.sideColumn {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: var(--s4) var(--s5) var(--s1);
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 48px 12px 1fr;
+  gap: 0 var(--s3);
+  padding-bottom: var(--s4);
+}
+
+.timelineAt {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineDot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--busy);
+}
+
+.timelineSub {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.panelFoot {
+  margin: 0;
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+/* ---- hospital arrivals ---- */
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s4) var(--s6);
+}
+
+.switchBox {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.switchBoxOff {
+  border-color: color-mix(in srgb, var(--high) 45%, var(--line));
+}
+
+.switchText {
+  display: flex;
+  flex-direction: column;
+  max-width: 300px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.switchText strong {
+  color: var(--ok);
+  font-size: var(--fs-md);
+}
+
+.switchBoxOff .switchText strong {
+  color: var(--high);
+}
+
+.switchProblem {
+  color: var(--critical);
+  font-weight: 500;
+}
+
+/* the switch: a 46×26 track, the knob slides right when on */
+.switch {
+  width: 46px;
+  height: 26px;
+  flex: none;
+  padding: 3px;
+  display: flex;
+  justify-content: flex-start;
+  border: none;
+  border-radius: 13px;
+  background: var(--line-strong);
+  cursor: pointer;
+}
+
+.switch[aria-checked="true"] {
+  justify-content: flex-end;
+  background: var(--ok);
+}
+
+.switch:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.knob {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.arrivals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sectionHead h2 {
+  font-size: var(--fs-lg);
+}
+
+.arrival {
+  display: flex;
+  flex-wrap: wrap;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.arrivalCritical {
+  box-shadow: inset 4px 0 0 var(--critical), var(--shadow);
+}
+
+.eta {
+  flex: 0 0 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--s4) var(--s3);
+  border-right: 1px solid var(--line);
+}
+
+.arrivalCritical .eta {
+  background: color-mix(in srgb, var(--critical) 7%, var(--surface));
+}
+
+.etaLabel {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.etaValue {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrivalBody {
+  flex: 1 1 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.arrivalWho {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s4) var(--s5) var(--s1);
+}
+
+.arrivalWho h3 {
+  font-size: var(--fs-lg);
+}
+
+.arrivalUnit {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.arrivalNeeds {
+  margin: 0;
+  padding: 0 var(--s5) var(--s3);
+  font-weight: 600;
+}
+
+/* ---- phone screens: one centred column ---- */
+.phone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.phoneTop {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.unitId {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.phoneTop .unitId + span {
+  flex: 1;
+}
+
+/* the instruction: the one dark card on the screen, so it is what the eye lands on */
+.instruction {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s5);
+  border-radius: 16px;
+  background: var(--text);
+  color: var(--bg);
+}
+
+.instruction h1 {
+  color: var(--bg);
+  font-size: 26px;
+}
+
+.instructionLabel {
+  opacity: 0.75;
+  font-size: var(--fs-sm);
+}
+
+.instructionEta {
+  opacity: 0.85;
+}
+
+.instructionMinutes {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.patientCard {
+  overflow: hidden;
+}
+
+.patientHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
+}
+
+.patientHead h2 {
+  font-size: var(--fs-lg);
+}
+
+.patientHead > :last-child {
+  margin-left: auto;
+}
+
+.patientNeeds {
+  margin: 0;
+  padding: 0 var(--s4) var(--s3);
+  font-weight: 600;
+}
+
+.nextStep {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding-top: var(--s2);
+}
+
+.bigButton {
+  height: 56px;
+  border: none;
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bigButton:hover {
+  background: var(--accent-hover);
+}
+
+.bigButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.quietButton {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+}
+
+.quietButton:hover {
+  background: var(--hover);
+}
+
+.stepProblem {
+  margin: 0;
+  color: var(--critical);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.needs legend {
+  padding: 0 var(--s1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+/* a 44px-tall tap target per need */
+.needChoice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.needChoice input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.hello {
+  margin: 0;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.allWell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s6) var(--s5);
+}
+
+.allWell p,
+.help p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s5);
+}
+
+.help h1 {
+  font-size: 26px;
+}
+
+.helpEta span {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.waitTips {
+  margin-top: var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+.waitTips h2 {
+  font-size: var(--fs-md);
+}
+
+.waitTips ul {
+  margin: var(--s2) 0 0;
+  padding-left: 1.2em;
+  color: var(--text-2);
+  line-height: 1.7;
+}

@@ -120,4 +120,24 @@ class JdbcVitalsRepositoryTest {
                 .query(Integer.class)
                 .list();
     }
+
+    // ---- history, for the trend lines ----
+
+    @Test
+    void theHistoryIsInTimeOrderAndStartsAtTheGivenTime() {
+        VitalsReading early = reading("p1", T0.minusSeconds(3600));
+        VitalsReading a = reading("p1", T0);
+        VitalsReading b = reading("p1", T0.plusSeconds(30));
+        VitalsReading c = reading("p1", T0.plusSeconds(60));
+        repo.save(c);
+        repo.save(early);
+        repo.save(a);                                   // saved out of order: a late reading
+        repo.save(b);
+        repo.save(reading("p2", T0));                   // another patient's
+
+        assertEquals(List.of(a, b, c), repo.historyFor("p1", T0));
+        assertEquals(List.of(), repo.historyFor("p2", T0.plusSeconds(1)));
+        assertThrows(IllegalArgumentException.class, () -> repo.historyFor(null, T0));
+        assertThrows(IllegalArgumentException.class, () -> repo.historyFor("p1", null));
+    }
 }

@@ -8,6 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -82,6 +84,29 @@ public class JdbcVitalsRepository implements VitalsRepository {
                 .param("patientId", patientId)
                 .query((rs, rowNum) -> toReading(rs))
                 .optional();
+    }
+
+    /**
+     * {@code WHERE at >= :from ORDER BY at}, a range scan on the primary key (patient, time).
+     *
+     * @param patientId the patient
+     * @param from      the earliest time to include
+     * @return the readings, oldest first
+     * @throws IllegalArgumentException if an argument is null
+     */
+    @Override
+    public List<VitalsReading> historyFor(String patientId, Instant from) {
+        if (patientId == null || from == null) {
+            throw new IllegalArgumentException("patientId and from are required");
+        }
+        return jdbc.sql("""
+                SELECT patient_id, at, heart_rate, spo2, systolic_bp, diastolic_bp, resp_rate, temperature, consciousness
+                FROM vitals WHERE patient_id = :patientId AND at >= :from ORDER BY at
+                """)
+                .param("patientId", patientId)
+                .param("from", DbTime.toDb(from))
+                .query((rs, rowNum) -> toReading(rs))
+                .list();
     }
 
     // getObject(..., Integer.class) keeps NULL as null; getInt would turn it into 0.

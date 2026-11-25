@@ -1,9 +1,9 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRoutes } from '../routes'
 import { FakeEventSource, fakeFetch, sampleSnapshot } from '../test/fakes'
-import type { FacilityInfo, InboundPatient } from '../api/types'
+import type { FacilityInfo, InboundPatient, PatientInfo, VitalsReading } from '../api/types'
 import { routeQuery } from '../map/routes'
 
 // renders the whole app at one address, the way the browser would open it
@@ -36,23 +36,52 @@ const ASHA: InboundPatient = {
   longitude: 77.6, distanceKm: 3.2, etaMinutes: 7, latestVitals: null,
 }
 
+const READING: VitalsReading = {
+  patientId: 'p001', timeStamp: '2026-11-24T12:59:30Z', heartRate: 124, spo2: 92, systolicBp: 92, diastolicBp: 58,
+  respRate: 26, temperature: 38.7, consciousness: 'CONFUSED',
+}
+
+const ASHA_RECORD: PatientInfo = {
+  id: 'p001', latitude: 12.94, longitude: 77.61, name: 'Asha Rao', age: 68, sex: 'FEMALE',
+  emergencyContact: { name: 'Rohan Rao', phone: '+91 98451 77302' },
+}
+
 describe('the hospital page', () => {
-  it('shows the hospital and its arrivals board', async () => {
+  it('shows the hospital and each arrival with its countdown, needs and vitals', async () => {
     vi.stubGlobal('fetch', fakeFetch({
       '/api/facilities/blr-h-jayanagar': [200, JAYANAGAR],
-      '/api/facilities/blr-h-jayanagar/inbound': [200, [ASHA]],
+      '/api/facilities/blr-h-jayanagar/inbound': [200, [{ ...ASHA, latestVitals: READING }]],
     }))
 
     openAt('/hospital/blr-h-jayanagar')
 
     expect(await screen.findByRole('heading', { name: 'Jayanagar Heart & Stroke Centre' })).toBeInTheDocument()
-    expect(screen.getByText('Accepting patients')).toBeInTheDocument()
-    const [row] = bodyRows('Arrivals')
-    expect(row).toHaveTextContent('Asha Rao')
-    expect(row).toHaveTextContent('68 F')
-    expect(within(row).getByTitle('Estimated arrival')).toHaveTextContent('7min')
-    expect(row).toHaveTextContent('Critical')
-    expect(row).toHaveTextContent('Stroke')
+    expect(screen.getByRole('switch', { name: 'Accepting new patients' })).toHaveAttribute('aria-checked', 'true')
+    const card = within(screen.getByRole('article', { name: 'Asha Rao, arriving in 7 minutes' }))
+    expect(card.getByText('68 F')).toBeInTheDocument()
+    expect(card.getByText('Critical')).toBeInTheDocument()
+    expect(card.getByText('Needs stroke care')).toBeInTheDocument()
+    expect(card.getByText('als-1, ALS ambulance, 3.2 km away')).toBeInTheDocument()
+    expect(card.getByText('124')).toBeInTheDocument()
+  })
+
+  it('puts the hospital on diversion with the switch', async () => {
+    const fetchMock = fakeFetch({
+      '/api/facilities/blr-h-jayanagar': [200, JAYANAGAR],
+      '/api/facilities/blr-h-jayanagar/inbound': [200, []],
+      '/api/facilities/blr-h-jayanagar/accepting': [200, { ...JAYANAGAR, accepting: false }],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    openAt('/hospital/blr-h-jayanagar')
+    expect(await screen.findByText('No patients on the way')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Accepting new patients' }))
+
+    expect(await screen.findByText('On diversion')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Accepting new patients' })).toHaveAttribute('aria-checked', 'false')
+    const put = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find((c) => c[1]?.method === 'PUT')
+    expect(put?.[0]).toBe('/api/facilities/blr-h-jayanagar/accepting')
+    expect(JSON.parse(String(put?.[1].body))).toEqual({ accepting: false })
   })
 
   it('says so for a hospital that does not exist', async () => {
@@ -176,36 +205,115 @@ describe('the control room', () => {
 })
 
 describe('the crew page', () => {
-  beforeEach(() => FakeEventSource.install())
-
-  it('shows the unit and its trip', () => {
-    openAt('/crew/als-1')
-    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
-
-    expect(screen.getByRole('heading', { name: 'als-1' })).toBeInTheDocument()
-    expect(screen.getByText('Go to the patient')).toBeInTheDocument()
-    expect(screen.getByText('Asha Rao')).toBeInTheDocument()
+  const snapshot = sampleSnapshot()
+  const callFor = (trip: unknown) => fakeFetch({
+    '/api/units/als-1': [200, snapshot.units[0]],
+    '/api/units/als-1/trip': trip === undefined ? [204, undefined] : [200, trip],
+    '/api/cases/c-critical': [200, snapshot.openCases[1]],
+    '/api/patients/p001/vitals?hours=1': [200, [READING]],
   })
 
-  it('says when there is no such unit', () => {
-    openAt('/crew/als-99')
-    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+  it('shows where to go, the patient and their vitals, and sends the next step', async () => {
+    const fetchMock = callFor(snapshot.activeTrips[0])               // EN_ROUTE to Asha Rao
+    vi.stubGlobal('fetch', fetchMock)
 
-    expect(screen.getByText('No unit with the id "als-99"')).toBeInTheDocument()
+    openAt('/crew/als-1')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Asha Rao' })).toBeInTheDocument()
+    expect(screen.getByText('Go to')).toBeInTheDocument()
+    expect(screen.getByText('124')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Arrived at the patient' }))
+
+    await waitFor(() => {
+      const posts = (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter((c) => c[1]?.method === 'POST')
+      expect(posts.map((c) => c[0])).toEqual(['/api/trips/t-1/arrive'])
+    })
+  })
+
+  it('asks what the patient needs before taking them to hospital', async () => {
+    const fetchMock = callFor({ ...snapshot.activeTrips[0], status: 'ARRIVED' })
+    vi.stubGlobal('fetch', fetchMock)
+    openAt('/crew/als-1')
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Stroke' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Take to hospital' }))
+
+    await waitFor(() => {
+      const post = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find((c) => c[1]?.method === 'POST')
+      expect(post?.[0]).toBe('/api/trips/t-1/transport')
+      expect(JSON.parse(String(post?.[1].body))).toEqual({ needs: ['STROKE'] })
+    })
+    expect(screen.getByRole('button', { name: 'Treated here, finish the call' })).toBeInTheDocument()
+  })
+
+  it('says when there is no call', async () => {
+    vi.stubGlobal('fetch', callFor(undefined))
+
+    openAt('/crew/als-1')
+
+    expect(await screen.findByText('No call')).toBeInTheDocument()
+  })
+
+  it('says when there is no such unit', async () => {
+    vi.stubGlobal('fetch', fakeFetch({}))
+
+    openAt('/crew/als-99')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No unit with the id "als-99"')
   })
 })
 
 describe('the patient page', () => {
+  beforeEach(() => FakeEventSource.install())
+
   it('a patient without an open case is fine, not an error', async () => {
     vi.stubGlobal('fetch', fakeFetch({
-      '/api/patients/p001': [200, { id: 'p001', latitude: 12.9, longitude: 77.6, name: 'Asha Rao', age: 68,
-        sex: 'FEMALE', emergencyContact: null }],
+      '/api/patients/p001': [200, ASHA_RECORD],
+      '/api/patients/p001/vitals?hours=1': [200, [READING]],
     }))
 
     openAt('/patient/p001')
 
-    expect(await screen.findByText('No alerts')).toBeInTheDocument()
+    expect(await screen.findByText('Your readings look normal')).toBeInTheDocument()
+    expect(screen.getByText('Hello, Asha')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('tells the patient an ambulance is coming', async () => {
+    vi.stubGlobal('fetch', fakeFetch({
+      '/api/patients/p001': [200, ASHA_RECORD],
+      '/api/patients/p001/case': [200, sampleSnapshot().openCases[1]],
+      '/api/patients/p001/vitals?hours=1': [200, [READING]],
+    }))
+    openAt('/patient/p001')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    expect(await screen.findByRole('heading', { name: 'An ambulance is coming to you' })).toBeInTheDocument()
+    expect(screen.getByText('als-1, driven by Ravi Kumar')).toBeInTheDocument()
+    expect(screen.getByText('While you wait')).toBeInTheDocument()
+  })
+})
+
+describe('the patient file', () => {
+  beforeEach(() => FakeEventSource.install())
+
+  it("shows who the patient is, the open case, the vitals with what is outside normal, and the case's events", async () => {
+    vi.stubGlobal('fetch', fakeFetch({
+      '/api/patients/p001': [200, ASHA_RECORD],
+      '/api/patients/p001/vitals?hours=6': [200, [{ ...READING, heartRate: 90 }, READING]],
+    }))
+
+    openAt('/control/patients/p001')
+    act(() => FakeEventSource.latest().emit('snapshot', JSON.stringify(sampleSnapshot())))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Asha Rao' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Rohan Rao, \+91 98451 77302/ })).toHaveAttribute('href', 'tel:+919845177302')
+    expect(screen.getByRole('region', { name: 'Open case' })).toHaveTextContent('Open since')
+    const vitals = section('Vitals now')
+    expect(vitals.getByText('124')).toHaveClass(/off/)
+    expect(vitals.getByText('Outside normal. Normal 51–90.')).toBeInTheDocument()
+    expect(section('What has happened in this case').getByText('als-1 sent')).toBeInTheDocument()
+    expect(section('Medical record').getByText('Not recorded yet')).toBeInTheDocument()
   })
 })
 

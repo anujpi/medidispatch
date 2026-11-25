@@ -95,6 +95,18 @@ Ordered roughly by priority inside each group.
 - [ ] **Cream theme: "High" is close to the accent.** The high-priority orange and the burnt-orange accent are
       similar; shift one if it confuses anyone.
 
+## Screens (after Step 1)
+
+- [ ] **Children's hospitals take adults.** The engine sent a 77-year-old to Malleshwaram Children's Hospital:
+      destination choice only checks the needed specialty. Give facilities an age range (or "children only") and
+      skip it for adults, and vice versa.
+- [ ] **The rest of the design canvas** ("MediDispatch screens"): medical record and reports, NEWS2 and usual
+      readings, SBAR handover and treatments, beds and teams, "patient received", sign-in, crew quick entry.
+- [ ] **Crew buttons vs the simulator.** Pressing a step on the crew phone for a simulated unit races the
+      simulator driving that unit; harmless (steps are repeat-safe) but confusing in a demo. A per-unit "manual"
+      switch in the simulator would hand a unit to a person.
+- [ ] **Patient phone reads the whole live feed** to find its ambulance; after SEC it needs its own endpoint.
+
 ## Control room and overrides
 
 - [ ] **Investigate: an override undone 3 seconds later (seen once, Nov 25).** On the live city a dispatcher's

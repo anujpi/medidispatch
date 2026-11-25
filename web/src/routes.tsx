@@ -4,6 +4,7 @@ import { CrewPage } from './pages/CrewPage'
 import { HomePage } from './pages/HomePage'
 import { HospitalPage } from './pages/HospitalPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { PatientFilePage } from './pages/PatientFilePage'
 import { PatientPage } from './pages/PatientPage'
 
 /**
@@ -15,6 +16,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/control" element={<ControlRoomPage />} />
+      <Route path="/control/patients/:patientId" element={<PatientFilePage />} />
       <Route path="/hospital/:facilityId" element={<HospitalPage />} />
       <Route path="/crew/:unitId" element={<CrewPage />} />
       <Route path="/patient/:patientId" element={<PatientPage />} />

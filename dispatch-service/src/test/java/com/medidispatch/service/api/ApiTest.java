@@ -723,4 +723,25 @@ class ApiTest {
         http.perform(post("/api/units/no-such-unit/out-of-service").contentType(MediaType.APPLICATION_JSON)
                 .content(reason("why"))).andExpect(status().isNotFound());
     }
+
+    @Test
+    void aPatientsVitalsComeBackOldestFirst() throws Exception {
+        http.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+                .content(patient("trend-p1", 18.5204, 73.8567))).andExpect(status().isCreated());
+        Instant now = Instant.now();
+        for (int minutesAgo : new int[] {5, 1}) {                        // the time window: JdbcVitalsRepositoryTest
+            http.perform(post("/api/readings").contentType(MediaType.APPLICATION_JSON)
+                    .content(reading("trend-p1", now.minusSeconds(minutesAgo * 60L), 70 + minutesAgo % 10, 97, "ALERT")))
+                    .andExpect(status().isOk());
+        }
+
+        http.perform(get("/api/patients/trend-p1/vitals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].heartRate").value(75))           // 5 min ago
+                .andExpect(jsonPath("$[1].heartRate").value(71));          // 1 min ago
+        http.perform(get("/api/patients/trend-p1/vitals?hours=0")).andExpect(status().isBadRequest());
+        http.perform(get("/api/patients/trend-p1/vitals?hours=73")).andExpect(status().isBadRequest());
+        http.perform(get("/api/patients/nobody/vitals")).andExpect(status().isNotFound());
+    }
 }

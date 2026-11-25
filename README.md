@@ -248,6 +248,7 @@ Web requests arrive on many threads at once, so every method holds one shared lo
 | `POST /api/cases/{id}/cancel` | the dispatcher calls a case off (`{"reason": "..."}`); its units are freed |
 | `POST /api/cases/{id}/send` | the dispatcher sends a unit of their choice (`{"unitId": "als-7", "reason": "..."}`), replacing the engine's choice |
 | `POST /api/units/{id}/out-of-service` | the dispatcher takes a unit off duty (`{"reason": "flat tyre"}`); its trip fails and the next unit is sent |
+| `GET /api/patients/{id}/vitals?hours=6` | a patient's readings over the last hours (1 to 72), oldest first: the trend lines |
 | `GET /api/cases/{id}`, `/api/patients/{id}/case`, `/api/units/{id}`, `/api/trips/{id}` | look things up |
 
 Errors use the standard problem format (RFC 9457) with codes that tell a client whether retrying can help: 400 for a bad body, 404 for an unknown id, 409 for a step that is not allowed now (arrive before accept, a duplicate id).
@@ -289,6 +290,8 @@ The crews take serious patients to hospital: after their time on scene, an ambul
 **The web app has started.** A React + TypeScript app in `web/` has a start page and the four faces: the control room (a summary strip, every open case most urgent first, and the fleet, live every second), a hospital's arriving patients, a crew's current call and a patient's own status. It is calm by design, following control-room display guidance: neutral surfaces, with colour kept for urgency and alarms, so a critical patient waiting for a unit stands out at a glance. It comes in three colour themes.
 
 **The control room is now a working console.** A live map shows every open case as a dot in its urgency colour, the units on the road and the road each one still has to drive, next to the case list. An alerts panel raises what needs a human: a case turning critical, a critical patient left waiting more than two minutes, a unit going offline, a hospital going on diversion; each stays until someone acknowledges it. Clicking a case opens a card with the patient, every unit on the way with its drive time, and the driver's phone number. And the dispatcher can **override the engine**: cancel a case (a false alarm), send a unit of their own choice instead of the engine's, or take a unit out of service (a flat tyre), in which case the engine sends the next-best unit at once. Every override needs a reason, which goes on the record.
+
+**Every role now has its own screen.** The dispatcher opens a **patient file** with the vital signs now, a six-hour trend line for each, and what has happened in the case; a value outside the normal range is marked in words as well as colour. The **hospital** sees each patient on the way with a large arrival countdown and their latest vitals, and can switch itself to diversion. The **crew's phone** says where to go and how many minutes it is by road, shows the patient's vitals, and has one large button for the next step (accept, arrived, take to hospital with what the patient needs, handed over). The **patient's phone** says whether an ambulance is coming and when, and what to do while waiting. A clickable design of the screens still to come (medical record, handover, beds and teams, sign-in) shows where this is going.
 
 Next: the control room's map, alerts and actions, then security (login, roles, and each hospital seeing only its own patients and units). Other known gaps are listed in [BACKLOG.md](BACKLOG.md).
 
@@ -336,7 +339,8 @@ Next: the control room's map, alerts and actions, then security (login, roles, a
 - [ ] The simulator driving the running service over HTTP
 - [x] Web app skeleton (React + TypeScript): the four faces, read-only, live control room
 - [x] Control room: live map, alerts, case card, operator overrides
-- [ ] Crew PWA and hospital panel
+- [x] Patient file, hospital arrivals, crew and patient phone screens
+- [ ] Medical record and NEWS2 scoring; handover and beds; installable crew app
 - [ ] OTP login, JWT and roles
 - [ ] Docker Compose for the whole stack
 - [ ] Weak-network testing; demo

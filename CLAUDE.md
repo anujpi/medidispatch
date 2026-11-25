@@ -704,7 +704,8 @@ hospitals/clinics with drivers, transport, return to base: a simulator-only beha
 driving back) -> M1 a live map page in the browser on OpenStreetMap (served by the service, reads /api/live) ->
 SEC security (L: login, roles operator/hospital/crew/device, hospital scoping) -> the screens.
 S1, S2, M1, routing R1-R5, M1b, A1 and A2a-c (web app, control room map, alerts, case card, operator overrides; see
-"Web app") are done; next SEC (login, roles), then the crew PWA and the hospital panel. Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
+"Web app") are done, and screens Step 1 (see "Screens plan"). Next: Step 2 (medical record + NEWS2 in the engine),
+Step 3 SEC (login, roles; its 5 decisions are still open), Step 4 (handover SBAR, beds and teams). Order changed Nov 22 (the user's call): ROUTING FIRST (R1..R5, see "Routing"), then M1b
 (map views: Streets/Plain/Dark/Satellite, layer toggles, bigger markers, live speed control in the simulator
 console), then SEC security (L): login, roles (operator, hospital, crew, device), hospital scoping, personal data
 only for roles that need it, non-guessable patient ids; the simulator and map then need to log in. Then the screens.
@@ -925,7 +926,7 @@ BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week
   cream (cream, ink, burnt orange; default, light), navy (navy, white, hot pink), charcoal (charcoal, sand,
   electric blue). --link separate from --accent for contrast; tabular-nums only on .time/.metricValue/.clock
   (Inter widens hyphens in "als-1" otherwise). CSS Modules per folder (components/, pages/).
-- Tests (37): client 6, useLiveSnapshot 4, pages 15, map/routes 3, control/alerts 5, control/CaseActions 4
+- Tests (49): client 6, useLiveSnapshot 4, pages 20, vitals 7, map/routes 3, control/alerts 5, control/CaseActions 4
   (FakeEventSource + fakeFetch in src/test/fakes.ts; Leaflet runs in jsdom, so the map is not mocked).
 
 ## Control room (A2a-c DONE)
@@ -974,3 +975,34 @@ BACKLOG.md cleanups were deferred by the user. Real scoring (NEWS2 etc.) is week
   first unit had failed (sim-injected). Not reproduced; in BACKLOG with the trip history. Inspecting the dev DB:
   `docker exec medidispatch-db-1 psql -U medidispatch -d medidispatch -c "..."` (tables assignments, cases with a
   `queued` column owned by JdbcCaseQueue, units).
+
+## Screens plan (Nov 25) and Step 1 (DONE)
+- The user asked for a proper interface to show a hospital. A DESIGN CANVAS (claude.ai artifact "MediDispatch screens",
+  https://claude.ai/artifact/NxEN5uV5sRWHTV5DZXCkpD, private) has 7 clickable screens with made-up data, one story
+  (Asha Rao, 68 F, possible sepsis, NEWS2 13 checked by hand; 13 again on oxygen): Sign in (phone + code), Control
+  room, Patient file (allergy, NEWS2, 6 vitals with trends, usual readings, conditions, medicines, reports,
+  timeline), Hospital arrivals (diversion switch, beds/teams, countdown cards, get-ready list), Handover (SBAR,
+  at home vs now, given in the ambulance, Patient received), Crew phone, Patient phone. It is the target, not the app.
+- Plan agreed: Step 1 = the new screens on data that exists (F); Step 2 = medical record (blood group, allergies,
+  conditions, medicines, reports) + NEWS2 in the engine (L); Step 3 = SEC (L); Step 4 = handover SBAR + treatments,
+  beds and teams, "patient received".
+- Step 1 service: VitalsRepository.historyFor(patientId, from) (oldest first); InMemoryVitalsRepository now keeps
+  up to KEEP=1000 readings per patient in time order (was latest only); JdbcVitalsRepository range scan on the
+  primary key; DispatchService.vitalsOf(patientId, hours 1..MAX_HISTORY_HOURS 72); GET /api/patients/{id}/vitals
+  ?hours=6 (404 unknown patient, 400 out of range; personal data with no login yet, ponytail-marked). Over HTTP a
+  reading older than the processor's maxAge is TOO_OLD and NOT stored, so the window is tested in the JDBC test.
+- Step 1 web: src/vitals.ts (VITAL_SIGNS with normal adult ranges = NEWS2 0-point bands, outOfRange,
+  alertnessAbnormal, trendPoints) and components/VitalsGrid (6 cells, 3 columns; "small" puts the unit under the
+  number; outside normal = --high colour AND the words "Outside normal"); api/useDriveMinutes (route minutes every
+  10 s, positions through a ref; used by the case card, crew and patient). AppShell `narrow` (480 px) for phones.
+  Pages: PatientFilePage /control/patients/:patientId (record, live snapshot for case + trips, vitals 6 h every
+  15 s, timeline from openedAt + trip assignedAt, "Medical record: not recorded yet"); case card gets latest vitals
+  + "Open patient file"; HospitalPage: countdown cards (clock time from the fetch time, not Date.now() in render:
+  react-hooks/purity), DiversionSwitch (PUT accepting; shows the new value until the next fetch); CrewPage polls
+  unit, /trip (204 = none), case, hospital, vitals every 3 s and shows ONE next step (accept / arrived / needs +
+  take to hospital or treated here / handed over); PatientPage: all well or "finding a unit" / "ambulance coming"
+  (minutes, unit, driver) / "crew with you" / "on the way to <hospital>" + wait tips; unit from the live feed until
+  SEC (ponytail-marked). screens.module.css holds these layouts.
+- Browser check Nov 25 on the live city: all screens correct; diversion switch changed the service and was switched
+  back; crew buttons NOT pressed live (the simulator drives those crews). Found: the engine sent a 77-year-old to
+  Malleshwaram Children's Hospital (no adults/children rule; BACKLOG).

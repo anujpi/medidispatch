@@ -2,6 +2,8 @@ package com.medidispatch.core.port;
 
 import com.medidispatch.core.domain.VitalsReading;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -28,4 +30,14 @@ public interface VitalsRepository {
      * @throws IllegalArgumentException if {@code patientId} is missing
      */
     Optional<VitalsReading> latestFor(String patientId);
+
+    /**
+     * The patient's readings taken at or after {@code from}, oldest first: the trend a screen draws.
+     *
+     * @param patientId the patient
+     * @param from      the earliest time to include
+     * @return the readings in time order; empty if there are none
+     * @throws IllegalArgumentException if an argument is missing
+     */
+    List<VitalsReading> historyFor(String patientId, Instant from);
 }

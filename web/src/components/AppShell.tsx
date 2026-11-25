@@ -10,10 +10,11 @@ import styles from './components.module.css'
  * optional status item, the theme picker) and the page.
  *
  * @param app  where this page is ("Control room"), shown as a breadcrumb after the mark
- * @param wide use a wider column (the control room)
+ * @param wide   use a wider column (the control room)
+ * @param narrow use a phone-width column (the crew and patient screens)
  */
-export function AppShell({ app, headerEnd, wide, children }:
-                           { app?: string; headerEnd?: ReactNode; wide?: boolean; children: ReactNode }) {
+export function AppShell({ app, headerEnd, wide, narrow, children }:
+                           { app?: string; headerEnd?: ReactNode; wide?: boolean; narrow?: boolean; children: ReactNode }) {
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
@@ -33,7 +34,7 @@ export function AppShell({ app, headerEnd, wide, children }:
           <ThemePicker />
         </div>
       </header>
-      <main className={`${styles.main} ${wide ? styles.wide : ''}`}>{children}</main>
+      <main className={`${styles.main} ${wide ? styles.wide : ''} ${narrow ? styles.narrowMain : ''}`}>{children}</main>
     </div>
   )
 }
