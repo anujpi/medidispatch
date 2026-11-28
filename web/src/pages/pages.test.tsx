@@ -5,6 +5,7 @@ import { AppRoutes } from '../routes'
 import { FakeEventSource, fakeFetch, sampleSnapshot } from '../test/fakes'
 import type { FacilityInfo, InboundPatient, PatientInfo, VitalsReading } from '../api/types'
 import { routeQuery } from '../map/routes'
+import { STORY_STEP_MS } from './HomePage'
 
 // renders the whole app at one address, the way the browser would open it
 function openAt(path: string) {
@@ -45,6 +46,78 @@ const ASHA_RECORD: PatientInfo = {
   id: 'p001', latitude: 12.94, longitude: 77.61, name: 'Asha Rao', age: 68, sex: 'FEMALE',
   emergencyContact: { name: 'Rohan Rao', phone: '+91 98451 77302' },
 }
+
+describe('the start page', () => {
+  const CLINIC: FacilityInfo = { ...JAYANAGAR, id: 'blr-c-indiranagar', name: 'Indiranagar Clinic', kind: 'CLINIC',
+    capabilities: [], accepting: false }
+
+  it('asks who you are, with one card for each kind of person', async () => {
+    vi.stubGlobal('fetch', fakeFetch({ '/api/facilities': [200, [JAYANAGAR]] }))
+
+    openAt('/')
+
+    expect(screen.getByRole('heading', { level: 1, name: 'From the first warning sign to the hospital door.' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Who are you today?' })).toBeInTheDocument()
+    expect(screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(
+      ["I watch over the city", 'I work at a hospital', "I'm on an ambulance crew", "I'm a patient or family"])
+    expect(within(screen.getByRole('article', { name: 'I watch over the city' }))
+      .getByRole('link', { name: 'Open the control room' })).toHaveAttribute('href', '/control')
+    expect(await screen.findByRole('combobox', { name: 'Your hospital' })).toBeInTheDocument()
+  })
+
+  it('plays the story of a call on a journey strip', () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', fakeFetch({ '/api/facilities': [200, []] }))
+      openAt('/')
+      const story = within(screen.getByRole('figure', { name: 'How a call unfolds' }))
+      expect(story.getByText('Help is on its way to Asha.')).toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(STORY_STEP_MS))
+
+      expect(story.getByText('The crew is with Asha now.')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('offers only hospitals, not clinics, and opens the chosen one', async () => {
+    const OTHER: FacilityInfo = { ...JAYANAGAR, id: 'blr-h-hebbal', name: 'Hebbal Hospital' }
+    vi.stubGlobal('fetch', fakeFetch({
+      '/api/facilities': [200, [JAYANAGAR, CLINIC, OTHER]],
+      '/api/facilities/blr-h-hebbal': [200, OTHER],
+      '/api/facilities/blr-h-hebbal/inbound': [200, []],
+    }))
+    openAt('/')
+
+    const picker = await screen.findByRole('combobox', { name: 'Your hospital' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Jayanagar Heart & Stroke Centre', 'Hebbal Hospital'])
+    fireEvent.change(picker, { target: { value: 'blr-h-hebbal' } })
+    fireEvent.click(screen.getByRole('button', { name: 'See who is coming' }))
+
+    expect(await screen.findByRole('heading', { name: 'Hebbal Hospital' })).toBeInTheDocument()
+  })
+
+  it('says so kindly when no hospital has joined yet', async () => {
+    vi.stubGlobal('fetch', fakeFetch({ '/api/facilities': [200, [CLINIC]] }))
+
+    openAt('/')
+
+    expect(await screen.findByText('No hospitals have joined yet.')).toBeInTheDocument()
+  })
+
+  it('opens a crew phone by the unit typed in', async () => {
+    vi.stubGlobal('fetch', fakeFetch({ '/api/facilities': [200, []] }))
+    openAt('/')
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your unit' }), { target: { value: ' als-99 ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Start my shift' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No unit with the id "als-99"')
+  })
+})
 
 describe('the hospital page', () => {
   it('shows the hospital and each arrival with its countdown, needs and vitals', async () => {

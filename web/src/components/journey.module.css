@@ -1,0 +1,141 @@
+/*
+  The journey strip. Five equal columns; the road runs from the centre of the first stop to the centre of the last
+  (10% to 90% of the width), and its filled part and the little ambulance are placed in % of that road.
+*/
+.strip {
+  --bubble: 44px;
+  --rider-room: 34px;   /* space above the stops for the little ambulance */
+  position: relative;
+  padding-top: var(--rider-room);
+  display: grid;
+  gap: var(--s3);
+}
+
+.compact {
+  --bubble: 28px;
+  --rider-room: 0px;
+  gap: 0;
+}
+
+.road {
+  position: absolute;
+  top: calc(var(--rider-room) + var(--bubble) / 2 - 2px);
+  left: 10%;
+  right: 10%;
+  height: 4px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--line-strong) 0 8px, transparent 8px 14px);
+}
+
+.roadDone {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width .6s ease;
+}
+
+/* the ambulance rides on top of the road, sitting above the current stop */
+.rider {
+  position: absolute;
+  top: calc(4px - var(--rider-room) - var(--bubble) / 2);
+  display: grid;
+  place-items: center;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  transition: left .6s ease;
+  animation: bob 1.4s ease-in-out infinite;
+}
+
+.compact .rider {
+  display: none;
+}
+
+@keyframes bob {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -2px; }
+}
+
+.stops {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  column-gap: var(--s2);
+}
+
+.stop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  text-align: center;
+}
+
+.bubble {
+  width: var(--bubble);
+  height: var(--bubble);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--muted);
+  transition: background .3s ease, color .3s ease, border-color .3s ease, transform .3s ease;
+}
+
+.compact .bubble svg {
+  width: 15px;
+  height: 15px;
+}
+
+.label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.compact .label {
+  display: none;
+}
+
+.done .bubble {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.done .label {
+  color: var(--text-2);
+}
+
+.current .bubble {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  transform: scale(1.12);
+  animation: glow 2s ease-out infinite;
+}
+
+.current .label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@keyframes glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.sentence {
+  margin-top: var(--s2);
+  text-align: center;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}

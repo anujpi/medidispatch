@@ -115,4 +115,21 @@
   --radius: 8px;
   --radius-sm: 6px;
   --control: 32px;    /* height of buttons and inputs */
+
+  /*
+    The warm layer (the human-facing screens: start page, phones, journey strip). Rounder cards, soft tints of the
+    urgency colours instead of flat blocks, and a lifted shadow. The tints are mixed from each theme's own colours,
+    so they work in all three themes without being written out three times.
+  */
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --control-lg: 44px;  /* a comfortable tap target on a phone */
+  --shadow-lift: 0 1px 2px rgba(28, 27, 25, .06), 0 12px 32px rgba(28, 27, 25, .08);
+
+  --critical-soft: color-mix(in srgb, var(--critical) 13%, var(--surface));
+  --high-soft: color-mix(in srgb, var(--high) 14%, var(--surface));
+  --medium-soft: color-mix(in srgb, var(--medium) 16%, var(--surface));
+  --ok-soft: color-mix(in srgb, var(--ok) 14%, var(--surface));
+  --busy-soft: color-mix(in srgb, var(--busy) 14%, var(--surface));
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }

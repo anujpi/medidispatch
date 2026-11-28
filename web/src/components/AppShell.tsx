@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { Link } from 'react-router'
 import { Clock } from './Clock'
+import { Logo } from './Logo'
 import { ThemePicker } from './ThemePicker'
 import styles from './components.module.css'
 
@@ -19,7 +20,7 @@ export function AppShell({ app, headerEnd, wide, narrow, children }:
     <div className={styles.shell}>
       <header className={styles.header}>
         <Link to="/" className={styles.brand}>
-          <img src="/favicon.svg" alt="" className={styles.logo} />
+          <Logo size={22} />
           <span className={styles.brandText}>MediDispatch</span>
         </Link>
         {app && (

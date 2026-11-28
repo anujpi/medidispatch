@@ -1,0 +1,233 @@
+/* The start page ("Who are you today?"). Warm layer: soft tints, round cards, generous space. */
+.page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--s8);
+}
+
+/* ---- the opening: the idea in words, and the story playing beside it ---- */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  align-items: center;
+  gap: var(--s7) var(--s8);
+  padding-top: var(--s4);
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.heroText {
+  display: grid;
+  gap: var(--s4);
+}
+
+.eyebrow {
+  justify-self: start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.heroTitle {
+  font-size: clamp(32px, 4.2vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.heroLead {
+  max-width: 46ch;
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.story {
+  margin: 0;
+  padding: var(--s6) var(--s6) var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+  display: grid;
+  gap: var(--s3);
+}
+
+.storyCaption {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---- the four people ---- */
+.who {
+  display: grid;
+  gap: var(--s5);
+}
+
+.whoHeader {
+  display: grid;
+  gap: var(--s1);
+}
+
+.whoTitle {
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
+}
+
+.whoLead {
+  color: var(--text-2);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s5);
+}
+
+/* four across, then two by two, then one column: never three and a lonely fourth */
+@media (max-width: 1100px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.card {
+  --tint: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  overflow: hidden;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.card:hover,
+.card:focus-within {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift);
+}
+
+.busy { --tint: var(--busy-soft); }
+.critical { --tint: var(--critical-soft); }
+.high { --tint: var(--high-soft); }
+.ok { --tint: var(--ok-soft); }
+
+.scene {
+  height: 128px;
+  padding: var(--s3) var(--s3) 0;
+  background: var(--tint);
+}
+
+.cardBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s5);
+}
+
+.cardTitle {
+  font-size: var(--fs-lg);
+  letter-spacing: -0.01em;
+}
+
+.cardText {
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+/* the action sits at the bottom of every card, so the four line up */
+.cardAction {
+  margin-top: auto;
+  padding-top: var(--s3);
+}
+
+.form {
+  display: grid;
+  gap: var(--s2);
+}
+
+.field {
+  width: 100%;
+  height: var(--control-lg);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+
+.field::placeholder {
+  color: var(--muted);
+}
+
+.field:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  width: 100%;
+  height: var(--control-lg);
+  padding: 0 var(--s4);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.primary:hover {
+  background: var(--accent-hover);
+  text-decoration: none;
+}
+
+.primary svg {
+  transition: transform .15s ease;
+}
+
+.primary:hover svg {
+  transform: translateX(3px);
+}
+
+.quiet {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.footnote {
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
